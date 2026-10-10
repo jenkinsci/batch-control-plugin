@@ -14,7 +14,7 @@
      so it stays clickable there.
      e2e-11 (as e2e-06 UX-8): eight tabs with three badges must fit one row at 1280 px, so the
      buttons are a little tighter than core's default padding. -->
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib:layout">
   <st:documentation>
     The Batch Control tab bar.
     <st:attribute name="active" use="required">
@@ -22,9 +22,7 @@
       incidents or history.
     </st:attribute>
   </st:documentation>
-  <!-- Through the root action, not j:invokeStatic: invokeStatic loads classes with core's class
-       loader and cannot see plugin classes in a real Jenkins (only a flat test classpath). -->
-  <j:set var="bcTabs" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0).tabs}"/>
+  <j:invokeStatic var="bcTabs" className="io.jenkins.plugins.batchcontrol.ui.SectionTabs" method="current"/>
   <j:set var="bcPath" value="${request2.requestURI}"/>
   <nav class="app-build-tabs jenkins-!-margin-bottom-3" aria-label="Batch Control sections" data-batch-control-tabs="true">
     <j:forEach var="tab" items="${bcTabs}">
