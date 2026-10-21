@@ -81,6 +81,7 @@ public class ItemScopeUiTest {
     static final String FOLDER_ID = "com.cloudbees.hudson.plugins.folder.Folder";
     static final String PIPELINE_ID = "org.jenkinsci.plugins.workflow.job.WorkflowJob";
     static final String CHECK = "batch-control/grants/checkScopeFullName";
+    static final String AUTOCOMPLETE = "batch-control/grants/autoCompleteScopeFullName";
 
     private JenkinsRule j;
 
@@ -219,6 +220,82 @@ public class ItemScopeUiTest {
         }
 
         assertCheck("g1", "batch-x", "ok", "Freestyle project 'batch-x'");
+    }
+
+    /**
+     * T-08-262 (issue #8, D-71): {@code GET grants/autoCompleteScopeFullName} suggests the full names
+     * of the items g1 may read that contain what was typed, ignoring case, those that start with it
+     * first: {@code team} offers {@code team} then {@code team/inner}; {@code INNER} offers
+     * {@code team/inner}; {@code batch} offers {@code batch-x}. {@code secret}, which g1 may not see,
+     * is never offered, not even for its exact name, and nothing is offered for an empty field or a
+     * name nothing contains. Guard: the administrator, who may see {@code secret}, is offered it.
+     */
+    @Test
+    public void t_08_262_autoCompleteOffersTheVisibleItemsThatContainWhatWasTyped() throws Exception {
+        assertEquals(Arrays.asList("team", "team/inner"), suggestions("g1", "team"));
+        assertEquals(Arrays.asList("team/inner"), suggestions("g1", "INNER"));
+        assertEquals(Arrays.asList("batch-x"), suggestions("g1", "batch"));
+
+        assertEquals(Arrays.<String>asList(), suggestions("g1", "secret"), "an item g1 may not see is not offered");
+        assertEquals(Arrays.<String>asList(), suggestions("g1", "sec"), "nor by a part of its name");
+        assertEquals(Arrays.<String>asList(), suggestions("g1", ""), "an empty field gets no suggestions");
+        assertEquals(Arrays.<String>asList(), suggestions("g1", "no-such-item"), "a name nothing contains gets none");
+
+        assertEquals(Arrays.asList("secret"), suggestions("admin", "secret"), "guard: the administrator may see secret");
+    }
+
+    /**
+     * T-08-263 (issue #8): at most 20 names are offered, so a Jenkins with many items does not answer
+     * a keystroke with its whole tree, and the list is in a stable order. 25 jobs {@code many-01} ..
+     * {@code many-25} are offered as the first 20 of them for {@code many}. Guard: a more specific
+     * {@code many-25} still finds the one beyond the first 20.
+     */
+    @Test
+    public void t_08_263_autoCompleteOffersAtMostTwentyNames() throws Exception {
+        List<String> expected = new ArrayList<>();
+        for (int i = 1; i <= 25; i++) {
+            String name = String.format("many-%02d", i);
+            j.createFreeStyleProject(name);
+            if (i <= 20) {
+                expected.add(name);
+            }
+        }
+        assertEquals(expected, suggestions("g1", "many"));
+        assertEquals(Arrays.asList("many-25"), suggestions("g1", "many-25"));
+    }
+
+    /**
+     * T-08-264 (issue #8, as T-08-121 for the check): the suggestions need the permission to request
+     * a window. n1 (Batch Control, no request permission) and a1 (approver only) get 403, p0 (no
+     * Batch Control permission) 404 (SPEC 2), and none of them is told an item name. Guard: g1 is
+     * offered {@code batch-x}.
+     */
+    @Test
+    public void t_08_264_autoCompleteRequiresThePermissionToRequest() throws Exception {
+        for (String[] caller : new String[][] {{"n1", "403"}, {"a1", "403"}, {"p0", "404"}}) {
+            WebResponse r = ApproverFormFixtures.get(j, caller[0], AUTOCOMPLETE + "?value=batch");
+            assertEquals(Integer.parseInt(caller[1]), r.getStatusCode(), caller[0] + "'s request for suggestions must answer "
+                    + caller[1] + ": " + excerpt(r.getContentAsString()));
+            assertFalse(r.getContentAsString().contains("batch-x"), caller[0] + " must not be told an item name");
+        }
+        assertEquals(Arrays.asList("batch-x"), suggestions("g1", "batch"));
+    }
+
+    /**
+     * T-08-265 (issue #8): the item field of the request form, blank and prefilled, is wired to the
+     * suggestions: it carries the URL of {@code grants/autoCompleteScopeFullName}. Guard: the field
+     * keeps its name check ({@code checkScopeFullName}).
+     */
+    @Test
+    public void t_08_265_requestFormFieldIsWiredToTheSuggestions() throws Exception {
+        for (String path : new String[] {"batch-control/grants/new", "batch-control/grants/new?scopeFullName=team",
+                "batch-control/grants/dialog"}) {
+            HtmlPage page = UsabilityFixtures.htmlPage(j, "g1", path);
+            DomElement field = page.getElementsByName("scopeFullName").get(0);
+            String markup = field.asXml();
+            assertTrue(markup.contains("autoCompleteScopeFullName"), path + ": the item field must be wired to the suggestions: " + markup);
+            assertTrue(markup.contains("checkScopeFullName"), path + ": guard: the item field keeps its name check: " + markup);
+        }
     }
 
     /**
@@ -472,6 +549,19 @@ public class ItemScopeUiTest {
         assertEquals(200, r.getStatusCode(), userId + "'s check of " + name + " must answer 200: " + excerpt(r.getContentAsString()));
         assertEquals(expectedKind, kind(r), userId + "'s check of " + name + ": " + excerpt(r.getContentAsString()));
         assertTrue(text(r).contains(expectedText), userId + "'s check of " + name + " must say " + expectedText + ", was: " + text(r));
+    }
+
+    /** The names {@code GET grants/autoCompleteScopeFullName} offers {@code userId} for {@code typed}, in order. */
+    private List<String> suggestions(String userId, String typed) throws Exception {
+        WebResponse r = ApproverFormFixtures.get(j, userId, AUTOCOMPLETE + "?value="
+                + java.net.URLEncoder.encode(typed, java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(200, r.getStatusCode(), userId + "'s suggestions for '" + typed + "': " + excerpt(r.getContentAsString()));
+        List<String> names = new ArrayList<>();
+        Matcher m = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]*)\"").matcher(r.getContentAsString());
+        while (m.find()) {
+            names.add(m.group(1));
+        }
+        return names;
     }
 
     /** The FormValidation kind of a validation answer ({@code <div class=ok|warning|error>}), or "". */
