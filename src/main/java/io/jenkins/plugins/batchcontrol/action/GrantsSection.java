@@ -407,6 +407,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * {@link #doCheckScopeFullName} and an invisible item is not disclosed by being offered. An
      * empty field gets no suggestions, and at most {@link #MAX_SCOPE_SUGGESTIONS} are offered.
      */
+    // Read-only GET (autocomplete); REQUEST_GRANT is checked first and only readable items are offered.
+    @SuppressWarnings("lgtm[jenkins/csrf]")
     public AutoCompletionCandidates doAutoCompleteScopeFullName(@QueryParameter String value) {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST_GRANT);
         AutoCompletionCandidates candidates = new AutoCompletionCandidates();
