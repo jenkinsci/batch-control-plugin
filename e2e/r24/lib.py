@@ -212,6 +212,10 @@ def browser_decide(user, rid, verb, comment, shot=None, kind="requests"):
         box.fill(comment)
     with s.page.expect_navigation(timeout=30000) as nav:
         btn.click()
+        # #93: Reject asks for confirmation first (skipped for a blank comment, which the
+        # server refuses anyway); confirm core's dialog so the form posts.
+        if verb == "reject" and comment.strip() and L19._r6.opened(s.page, timeout=5000):
+            s.page.locator("dialog[open] button[data-id=ok]").first.click()
     s.page.wait_for_load_state("load")
     status = nav.value.status if nav.value else None
     t = s.text()

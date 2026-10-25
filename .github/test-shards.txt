@@ -62,6 +62,7 @@ DecidedRequestApproverChangeTest
 MultiApproverTest PendingCountTest QueueBlockTest RunControlUsabilityTest
 DeprecatedUserCauseTest
 DecisionAreaTest
+RejectConfirmationTest
 OwnerScenario*Test
 # notifications
 EmailNotification*Test ExpiryNoticeIsolationTest Notification*Test

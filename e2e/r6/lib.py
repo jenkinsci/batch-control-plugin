@@ -138,7 +138,7 @@ class Session:
         self.page = self.context.new_page()
         self.page.set_default_timeout(20000)
         self.page.on("console", lambda m: self.console.append(f"{m.type}: {m.text}") if m.type in ("error", "warning") else None)
-        self.page.on("pageerror", lambda e: self.console.append(f"pageerror: {e}"))
+        self.page.on("pageerror", self._record_pageerror)
         self.page.on("response", lambda r: self.bad.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None)
         if user and not self.reused:
             p = self.page
@@ -157,6 +157,23 @@ class Session:
         _OPEN.append(self)
         if TRACE_DIR:
             self.context.tracing.start(screenshots=True, snapshots=True, title=f"{user or 'anonymous'} #{self._seq}")
+
+    def _record_pageerror(self, e):
+        """Record a page error with its stack trace and the URL of the page it fired on (#87): the bare message
+        alone ("Cannot read properties of undefined (reading 'replace')") names neither the throwing script nor
+        the page, so the def07 FAIL row could not say where the error came from. The entry keeps the old first
+        line, so existing readers of self.console (prefix and substring checks) see the same text as before.
+        Recording must never fail a step, so a page that is already navigating or closed still leaves the
+        message behind on its own."""
+        entry = f"pageerror: {e}"
+        try:
+            stack = (getattr(e, "stack", None) or "").strip()
+            if stack:
+                entry += f"\nstack: {stack[:1000]}"
+            entry += f"\nurl: {self.page.url}"
+        except Exception:
+            pass
+        self.console.append(entry)
 
     def go(self, path):
         r = self.page.goto(BASE + path)

@@ -179,8 +179,12 @@
             <j:if test="${!it.jobDisabled}">
               <button type="submit" formaction="${decisionUrl}approve" class="jenkins-button jenkins-button--primary">Approve</button>
             </j:if>
+            <!-- #93: rejection is final, so this button asks for confirmation first
+                 (core's confirmation dialog, the one l:confirmationLink uses); the
+                 form posts only after the approver confirms. -->
             <button type="submit" formaction="${decisionUrl}reject"
-                    class="jenkins-button jenkins-!-destructive-color">Reject</button>
+                    class="jenkins-button jenkins-!-destructive-color"
+                    data-batch-control-confirm-reject="true">Reject</button>
           </div>
         </f:form>
       </j:if>

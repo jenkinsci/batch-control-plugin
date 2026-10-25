@@ -87,6 +87,19 @@ final class DecisionAreaFixtures {
         }
         HtmlElement button = button(page, caption);
         assertNotNull(button, "the Decision section must offer " + caption);
+        // #93: the Reject button asks for confirmation through core's dialog before the form
+        // posts. Auto-confirm it so the form posts as the test intends: a native confirm handler
+        // (should the page ever use one) plus a stub that resolves core's window.dialog.confirm.
+        // A blank comment skips the dialog (the server refuses), so this is a no-op there.
+        page.getWebClient().setConfirmHandler((p, message) -> true);
+        page.executeJavaScript("if (!window.dialog) { window.dialog = {}; }"
+                + "if (typeof window.dialog.confirm === 'function' && !window.dialog.confirm.__bcAutoConfirm) {"
+                + "  window.dialog.confirm = (function (original) {"
+                + "    var stub = function () { return Promise.resolve(); };"
+                + "    stub.__bcAutoConfirm = true;"
+                + "    return stub;"
+                + "  })(window.dialog.confirm);"
+                + "}");
         Page next = button.click();
         page.getWebClient().waitForBackgroundJavaScript(2000);
         Page current = page.getWebClient().getCurrentWindow().getEnclosedPage();

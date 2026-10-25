@@ -1,12 +1,20 @@
 """e2e-12: incident Resolve (shown once acknowledged) and Add Comment (the comment appears on the page), as admin and
-approver-1; Request Rerun with no approver ticked stays on the page with an error and the reason kept."""
+approver-1; Request Rerun with no approver ticked stays on the page with its error.
+
+H1 (2026-10-24): judged at the end (ci/h1_rules.py judge_targeted "incident"). The incident rerun form has no reason
+field (it carries the failed run's values, SPEC 11), so "reason kept" is not recorded any more (triage T-04): the
+refusal must answer 400 with "Check at least one approver."."""
 import re
 from lib import Session, close, api, BASE
 import lib
 from actions import f_incident
 
 
+ROWS = []
+
+
 def emit(row):
+    ROWS.append(row)
     lib.log("incident", row)
     print(row)
 
@@ -44,9 +52,6 @@ s = Session("admin")
 s.go(f"/batch-control/incidents/{iid}/")
 f = s.page.locator("form[name=rerun]")
 row = {"case": "rerun validation", "fields": [x.get_attribute("name") for x in f.locator("input, textarea, select").all()][:12]}
-ta = f.locator("textarea[name=reason]")
-if ta.count():
-    ta.fill("rerun reason kept?")
 for b in f.locator("input[name=approvers]").all():
     if b.is_checked():
         b.locator("xpath=following-sibling::label").first.click()
@@ -55,7 +60,7 @@ with s.page.expect_navigation() as nav:
 row["status"] = nav.value.status
 row["url"] = s.page.url.replace(BASE, "")
 row["errors"] = [t.strip()[:120] for t in s.page.locator(".error, .jenkins-alert-danger").all_inner_texts() if t.strip()][:3]
-row["reason_kept"] = s.page.locator("form[name=rerun] textarea[name=reason]").input_value() if s.page.locator("form[name=rerun] textarea[name=reason]").count() else None
 s.shot("#main-panel", "I-rerun-validation")
 s.done(); close()
 emit(row)
+lib.h1.report("incident", ROWS)

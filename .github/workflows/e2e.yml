@@ -7,15 +7,25 @@
 # them into the matrix; each shard job is named after its group's label, "e2e (<label>)". The
 # artifacts and e2e/ci/out/<k>/ keep the shard index.
 #
-# Non-blocking: no job of this workflow is a required status check. The required checks on
-# main are "build" (build.yml) and ci.jenkins.io's "Jenkins"; the job names here ("e2e build",
-# "e2e groups", "e2e (<label>)", "e2e coverage") are kept distinct from them, because a required
-# check is matched by name.
+# Required check: "e2e result" is the one job of this workflow meant to be a required status
+# check on main (next to "build" from build.yml and ci.jenkins.io's "Jenkins"). The other job
+# names ("changes", "e2e build", "e2e groups", "e2e (<label>)", "e2e coverage") are kept distinct
+# from every required check, because a required check is matched by name; scripts also depend on
+# the "e2e ..." names, so they do not change.
 #
-# Runs only when an input of the suite changes (the same "paths" list on push and pull_request:
-# the plugin's sources and Maven build, e2e/, this file); workflow_dispatch runs it on any ref.
-# Only a workflow with no required check may be path-filtered: a skipped workflow would leave a
-# required check pending.
+# The workflow runs on every pull_request and every push to main (no workflow-level "paths"
+# filter: a skipped workflow would leave a required check pending forever). The first job,
+# "changes", decides whether an input of the suite changed: src/main/**, pom.xml, .mvn/**, e2e/**
+# or this file. Pull request: git diff of the PR's base commit against its head commit, three-dot
+# (from the merge base, as in the PR's "Files changed"). Push to main: the previous tip against the
+# pushed commit. workflow_dispatch, a new branch (all-zero "before"), or a diff that cannot be
+# computed: the suite runs. "e2e build", "e2e groups", the shards and "e2e coverage" run only when
+# "changes" says so, and then exactly as before.
+#
+# "e2e result" always runs last. It succeeds when the suite was not needed, or when "e2e build",
+# "e2e groups", every "e2e (<label>)" shard and "e2e coverage" all succeeded; any failure,
+# cancellation, or a job skipped while the suite was needed makes it fail. Its log gives the reason
+# in one line.
 #
 # Runs with the default read-only token and no secrets, so fork pull requests work too: the
 # coverage report goes to the job summary, annotations and an artifact, never to a PR comment
@@ -26,19 +36,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'src/main/**'
-      - 'pom.xml'
-      - '.mvn/**'
-      - 'e2e/**'
-      - '.github/workflows/e2e.yml'
   pull_request:
-    paths:
-      - 'src/main/**'
-      - 'pom.xml'
-      - '.mvn/**'
-      - 'e2e/**'
-      - '.github/workflows/e2e.yml'
   workflow_dispatch:
 
 permissions:
@@ -49,8 +47,55 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Lightweight gate: does this event touch an input of the suite? Output run=true|false.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      # The full history, so that the merge base (pull_request) and the previous tip (push) are present.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Did an input of the suite change?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        shell: bash
+        run: |
+          # The same set the workflow-level "paths" filter used to have.
+          pattern='^(src/main/|\.mvn/|e2e/)|^(pom\.xml|\.github/workflows/e2e\.yml)$'
+          run=true
+          range=""
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE...$PR_HEAD"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]]; then
+            range="$BEFORE..$AFTER"
+          fi
+          if [ -z "$range" ]; then
+            echo "Event $EVENT without a comparable base: the suite runs."
+          elif ! files="$(git diff --name-only "$range")"; then
+            echo "::warning::git diff $range failed: the suite runs."
+          elif matched="$(grep -E "$pattern" <<<"$files")"; then
+            echo "Inputs of the suite changed in $range:"
+            echo "$matched"
+          else
+            run=false
+            echo "No input of the suite changed in $range: the suite is skipped."
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   build:
     name: e2e build
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -75,10 +120,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # No needs: runs alongside build. shard.py uses the standard library only, so the runner's python3 is enough.
+  # Needs only changes: runs alongside build. shard.py uses the standard library only, so the runner's python3 is enough.
   # check fails the run on an inconsistent GROUPS (::error:: lines) and writes the group table to the job summary.
   groups:
     name: e2e groups
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -256,3 +303,37 @@ jobs:
             --tracing retain-on-failure --output e2e/ci/out/selftest 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
+
+  # The required status check. Always runs (also on a cancelled run, then it fails), so a PR
+  # always gets a verdict, whatever paths it touches.
+  result:
+    name: e2e result
+    needs: [changes, build, groups, e2e, coverage]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verdict
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RUN: ${{ needs.changes.outputs.run }}
+          BUILD: ${{ needs.build.result }}
+          GROUPS: ${{ needs.groups.result }}
+          E2E: ${{ needs.e2e.result }}
+          COVERAGE: ${{ needs.coverage.result }}
+        shell: bash
+        run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::FAIL: the changes job ended '$CHANGES', so it is unknown whether the suite was needed."
+            exit 1
+          fi
+          if [ "$RUN" != true ]; then
+            echo "PASS: no input of the suite changed, the suite was not needed."
+            exit 0
+          fi
+          if [ "$BUILD" = success ] && [ "$GROUPS" = success ] && [ "$E2E" = success ] && [ "$COVERAGE" = success ]; then
+            echo "PASS: e2e build, e2e groups, every e2e shard and e2e coverage succeeded."
+            exit 0
+          fi
+          echo "::error::FAIL: the suite was needed; e2e build=$BUILD, e2e groups=$GROUPS, e2e shards=$E2E, e2e coverage=$COVERAGE."
+          exit 1
