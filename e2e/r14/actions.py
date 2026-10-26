@@ -6,7 +6,15 @@ submit label, confirmation links by label), and each control is exercised on its
   * confirmation link: Cancel first (state must not change), Escape (must close), then OK (state must change);
   * POST form: a comment is typed if there is a textarea, approvers changed for "Change Approvers",
     then submitted; landing status/URL, error text and the State row before/after are recorded.
-A control visible to a role that answers 4xx is a defect. Rows: out/actions.jsonl."""
+A control visible to a role that answers 4xx is a defect. Rows: out/actions.jsonl.
+
+H1 (2026-10-24): the rows are judged at the end (ci/h1_rules.py judge_actions): each role's detail page status and
+control list against ACTION_PROBES, every POST a control makes below 400, the confirmation's Cancel and Escape closing
+without a state change, and the state the control leaves on the page and on the server against ACTION_STATE; console
+errors only through the allowlist. Recorded so that they mean that: the server state is the same row the page shows
+(the State row, else Status; the window's state, not its grant request's status, A-02), and post_status holds the status
+of every POST to a Batch Control URL the control made (the #93 confirmation dialog navigates without a response
+object, A-03)."""
 import json, re, sys, time
 from lib import Session, close, api, groovy, BASE, clean, gone, opened
 import lib
@@ -92,10 +100,14 @@ def state_of(page):
 
 
 def server_state(kind, iid):
+    """The state as the page shows it (state_of: the State row, else the Status row), read over REST as admin."""
     r = api("admin", f"/batch-control/{kind}/{iid}/")
-    t = clean(r.text)
-    m = re.search(r"(?:State|Status) (.{0,90})", t)
-    return r.status_code, (m.group(1) if m else "")[:90]
+    html = re.sub(r"<!--.*?-->", "", r.text, flags=re.S)
+    for label in ("State", "Status"):
+        m = re.search(r"<tr[^>]*>\s*<th[^>]*>\s*" + label + r"\s*</th>\s*<td[^>]*>(.*?)</td>", html, re.S)
+        if m:
+            return r.status_code, re.sub(r"\s+", " ", clean(m.group(1))).strip()[:120]
+    return r.status_code, ""
 
 
 CONTROLS_JS = r"""
@@ -118,7 +130,11 @@ CONTROLS_JS = r"""
 
 
 
+ROWS = []
+
+
 def emit(row):
+    ROWS.append(row)
     lib.log("actions", row)
     print(json.dumps(row)[:300])
 
@@ -131,6 +147,8 @@ def exercise(role, kindkey, control):
     before = state_of(s.page)
     row = {"role": role, "item": kindkey, "control": control["label"], "ctype": control["type"], "id": iid, "state_before": before}
     p = s.page
+    posts = []  # A-03: the status of every POST to a Batch Control URL
+    p.on("response", lambda r: posts.append(r.status) if r.request.method == "POST" and "/batch-control/" in r.url else None)
     try:
         if control["type"] == "confirm":
             a = p.locator("#main-panel a[data-url][data-post]", has_text=control["label"]).first
@@ -188,7 +206,8 @@ def exercise(role, kindkey, control):
     except Exception as e:  # noqa
         row["exception"] = str(e)[:200]
     row["server_after"] = server_state(kind, iid)
-    row["console"] = [c for c in s.console if "MIME type" not in c][:3]
+    row["post_status"] = posts
+    row["console"] = s.console[:10]
     s.done()
     emit(row)
 
@@ -212,3 +231,4 @@ if __name__ == "__main__":
             for c in ctls:
                 exercise(role, kindkey, c)
     close()
+    lib.h1.report("actions", ROWS, {"roles": ROLES})

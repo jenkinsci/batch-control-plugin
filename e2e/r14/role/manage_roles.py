@@ -4,8 +4,10 @@ Arranged by casc/profile-role.yaml (applied by setup.py). As admin in the browse
 Roles, add a global role and an item role through the Add Role dialog, typing an invalid and a
 valid pattern first so the forwarded checkPattern answer is shown. Records every request the
 page makes (status >= 400 flagged) and the console. Server state is read separately.
+H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "manage_roles"); a finding prints a "FAIL role ..." line.
 """
 import re
+import lib
 from lib import Session, close, log, strategy, groovy, BASE
 
 res = {}
@@ -86,3 +88,4 @@ def r=s.getRoleMap(com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Global
 for k, v in res.items():
     print(k, "=>", v)
 log("manage_roles", res)
+lib.h1.report("role/manage_roles", [res])

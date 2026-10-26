@@ -15,6 +15,12 @@ Session, close, api, groovy, log, ENV, BASE, pw = _l.Session, _l.close, _l.api, 
 shot = _l.shot
 react, gone, opened, until, submit_and_wait, poll = _l.react, _l.gone, _l.opened, _l.until, _l.submit_and_wait, _l.poll  # e2e-20 condition waits
 SHOTS = _l.SHOTS
+
+# H1: the fail rules of the observational drivers (ci/h1_rules.py); a driver ends with h1.report(<driver>, rows, ctx)
+_h1spec = importlib.util.spec_from_file_location("h1_rules", HERE.parent / "ci" / "h1_rules.py")
+h1 = importlib.util.module_from_spec(_h1spec)
+_h1spec.loader.exec_module(h1)
+PREFIX = __import__("urllib.parse").parse.urlparse(BASE).path.rstrip("/")
 import re  # noqa: E402
 
 def clean(html):

@@ -6,9 +6,11 @@ R13-7: GET is refused (RequirePOST) for admin and others; non-admin accounts (re
 approver-1, nobc, anonymous) get 403 on POST; the endpoints dropped by D-35g (checkName,
 checkForWhitespace) are gone. A check that Manage/Assign Roles and the role-strategy REST calls
 never return 403/404/500 for admin is part of manage_roles.py and assign_roles.py.
+H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "endpoints"); a finding prints a "FAIL role ..." line.
 """
 import re
 import requests
+import lib
 from lib import api, log, BASE, strategy, groovy
 
 res = {}
@@ -60,3 +62,4 @@ for k, v in res.items():
     else:
         print(k, "=>", v)
 log("endpoints", res)
+lib.h1.report("role/endpoints", [res])

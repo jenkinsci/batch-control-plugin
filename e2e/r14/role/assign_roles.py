@@ -5,8 +5,10 @@ padded, an unknown and an existing user and an unknown group; assign nobc to e2e
 (Overall/Read) and e2e13-team (item role from manage_roles.py, Job/Read+Configure on team(/.*)?),
 unassign the item role, delete the nobc entry. After every step nobc's effective access is read
 over REST (basic auth) and the installed strategy class is checked.
+H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "assign_roles"); a finding prints a "FAIL role ..." line.
 """
 import re
+import lib
 from lib import Session, close, log, strategy, api, BASE
 
 res = {}
@@ -144,3 +146,4 @@ close()
 for k, v in res.items():
     print(k, "=>", v)
 log("assign_roles", res)
+lib.h1.report("role/assign_roles", [res])

@@ -18,8 +18,12 @@ BC_UNITS=a,b runs just those units instead of group k's (debugging).
 
 A step fails when the driver exits non-zero, or prints one of the drivers' own failure markers: a line starting
 with "FAIL " (round3.py, def07.py, the crawl's content checks), `"ok": false` (r15/check.py) or `"EXCEPTION":`
-(misc.py catches a section's exception and logs it). The drivers' assertions are not changed here. The observational
-drivers (crawl, actions, jobui) log rows for human review; their notable rows are counted in the summary.
+(misc.py catches a section's exception and logs it). The drivers that used to be observational only (crawl, actions,
+jobui, misc, the targeted scripts, r14/role, r15 side_dialog/folder_compare/menu) judge their own rows at their end
+with ci/h1_rules.py (H1) and print "FAIL <driver> <check> <json>" lines; their allowlist entries print "ALLOW <id>
+matched <n>" or, when an entry that applies matched nothing, "STALE allow <id> ...". STALE lines are warnings: the
+summary lists the entries that were stale in a step and matched in no step of the shard. The rows are still counted
+in the summary's observations.
 """
 import argparse
 import json
@@ -676,6 +680,8 @@ FAIL_LINE = re.compile(r"^FAIL ", re.M)
 OK_FALSE = re.compile(r'"ok": false')
 EXCEPTION = re.compile(r'"EXCEPTION": ')
 PASS_LINE = re.compile(r"^PASS ", re.M)
+STALE_LINE = re.compile(r"^STALE allow (\S+)", re.M)
+ALLOW_LINE = re.compile(r"^ALLOW (\S+) matched (\d+)", re.M)
 
 
 def r15_rows(before):
@@ -859,11 +865,14 @@ class Runner:
             shutil.rmtree(tdir, ignore_errors=True)  # retain-on-failure
             traces = []
         sess = [tuple(map(int, m)) for m in SESSIONS.findall(text)]
+        stale = sorted(set(STALE_LINE.findall(text)))
+        matched = {k: int(n) for k, n in ALLOW_LINE.findall(text)}
         prev = self.results.get(idx)
         res = {"step": name, "verdict": v, "reasons": reasons, "seconds": secs, "log": log.name,
                "pass_lines": passes, "failure_lines": lines, "attempt": attempt,
                "traces": [str(t.relative_to(self.outdir)) for t in traces], "traces_recorded": recorded,
-               "logins": sum(a for a, _ in sess), "logins_reused": sum(b for _, b in sess)}
+               "logins": sum(a for a, _ in sess), "logins_reused": sum(b for _, b in sess),
+               "stale_allow": stale, "allow_matched": matched}
         if prev and attempt > 1:
             res["earlier_attempts"] = prev.get("earlier_attempts", []) + [
                 {k: prev[k] for k in ("verdict", "reasons", "seconds", "log", "traces")}]
@@ -880,6 +889,8 @@ class Runner:
         shutil.rmtree(self.auth_dir, ignore_errors=True)
         results = [self.results[i] for i in sorted(self.results)]
         total = round(time.time() - self.t_all, 1)
+        matched = {k for r in results for k in r.get("allow_matched", {})}
+        stale = sorted({k for r in results for k in r.get("stale_allow", [])} - matched)
         summary = {"shard": f"{self.k}/{self.n}", "label": self.label, "units": [u.name for u in self.units],
                    "seconds": total,
                    "steps": results, "observations": observations(),
@@ -889,7 +900,10 @@ class Runner:
                    "traces_kept": sum(len(r.get("traces", [])) + sum(len(e.get("traces", [])) for e in r.get("earlier_attempts", []))
                                       for r in results),
                    "logins": sum(r.get("logins", 0) for r in results),
-                   "logins_reused": sum(r.get("logins_reused", 0) for r in results)}
+                   "logins_reused": sum(r.get("logins_reused", 0) for r in results),
+                   # H1: allowlist entries (ci/h1_rules.py) that applied in a step of this shard and matched nothing in
+                   # any step: a warning, not a failure (the core issue may be fixed, the entry may have to go)
+                   "stale_allow": stale}
         (self.outdir / "summary.json").write_text(json.dumps(summary, indent=1))
         (self.outdir / "summary.md").write_text(markdown(summary))
         return 1 if summary["failed"] else 0
@@ -925,6 +939,10 @@ def markdown(s):
             out.append("```")
             out += [l[:400] for l in r["failure_lines"]]
             out.append("```")
+    if s.get("stale_allow"):
+        out += ["", "#### Stale allowlist entries (warning, not a failure)", "",
+                "Entries of `ci/h1_rules.py` that applied to a step of this shard and matched nothing in any step: "
+                + ", ".join(f"`{x}`" for x in s["stale_allow"]) + "."]
     if s.get("observations"):
         out += ["", "#### Observational drivers (for review, not a verdict)", "", "```", json.dumps(s["observations"], indent=1), "```"]
     return "\n".join(out) + "\n"

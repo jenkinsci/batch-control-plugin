@@ -5,8 +5,10 @@ browser: requester asks for a CONFIGURE window on team/app-1, approver-1 approve
 opens and saves the configure page; admin revokes the window; requester is refused again.
 Server state (REST, basic auth) is read after every step, and the role pages are saved once while
 the window is open to check that a role-page save keeps the grant layer.
+H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "grant_overlay"); a finding prints a "FAIL role ..." line.
 """
 import re
+import lib
 from lib import Session, close, log, strategy, api, groovy, BASE
 
 res = {}
@@ -131,3 +133,4 @@ res["audit records"] = groovy(f"""def out=[]; new File(jenkins.model.Jenkins.get
 for k, v in res.items():
     print(k, "=>", v)
 log("grant_overlay", res)
+lib.h1.report("role/grant_overlay", [res])

@@ -8,7 +8,17 @@ label says:
     (input kept), Enter in a text field, then a complete submit lands on the new item's detail page;
   * navigating entries: the landing page's status (4xx/5xx is a defect unless it is the intended refusal
     page) and, for refusal pages, every link on them followed as the same user.
-Rows: out/jobui.jsonl."""
+Rows: out/jobui.jsonl.
+
+H1 (2026-10-24): the rows are judged at the end (ci/h1_rules.py judge_jobui): a page that does not answer 200, an
+exception, an entry that does nothing, a notification or a navigation status >= 400 that the allowlist does not name
+(job, label, exact text or status), a 4xx link on a landing page, a request dialog that Escape, Cancel or its close
+button does not close, whose empty submit does not stay with field errors or whose complete submit does not land on
+the stored request, and core's parameters dialog not leading to the prefilled Request Run form (or, for a user who may
+not request, not keeping the refusal). Console: error/pageerror only; the provoked 400s of a request dialog (the empty
+submit and the Enter step, SPEC 6) are allowed by count, everything else through the allowlist. An entry whose only
+reaction is one of core's notifications (Build scheduled, Done., the generic failure toast) is recorded as "notified"
+with the notification's text (J-03), not as NOTHING."""
 import json, re, sys, time
 from lib import Session, close, api, groovy, BASE, react, gone, submit_and_wait
 import lib
@@ -23,8 +33,12 @@ BC = re.compile(r"Request Run|Request Change Permission|Activation|activation|Ho
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
+ROWS = []
+
+
 def emit(row):
     row.update(ui=UI)
+    ROWS.append(row)
     lib.log("jobui", row)
     print(json.dumps(row)[:260])
 
@@ -66,6 +80,14 @@ def entries(s):
         p.keyboard.press("Escape")
         gone(p, ".tippy-box", 2000)
     return out
+
+
+def notifications(p, timeout=1500):
+    """The texts of core's notifications shown now (it shows one for a moment after an in-place post); waits up to
+    `timeout` ms for one to appear."""
+    sel = ".jenkins-notification, #notification-bar"
+    lib.until(p, lambda: [t for t in p.locator(sel).all_inner_texts() if t.strip()], timeout)
+    return [re.sub(r"\s+", " ", t).strip() for t in p.locator(sel).all_inner_texts() if t.strip()]
 
 
 def open_menu(p):
@@ -254,14 +276,18 @@ def main():
                         row["result"] = "menu"
                         row["menu"] = s.page.locator(".tippy-box").first.inner_text()[:150]
                     else:
-                        row["result"] = "NOTHING"
-                        row["notifications"] = [t for t in s.page.locator(".jenkins-notification, #notification-bar").all_inner_texts() if t.strip()]
+                        # J-03: core's notification is the reaction of an entry that posts in place (Build Now, the
+                        # rebuild plugin's Rebuild Last, core's generic failure toast); its text is judged
+                        notes = notifications(s.page)
+                        row["result"] = "notified" if notes else "NOTHING"
+                        row["notifications"] = notes
                 except Exception as e:  # noqa
                     row["exception"] = str(e)[:200]
-                row["console"] = [c for c in s.console[nc:] if "MIME type" not in c][:3]
+                row["console"] = s.console[nc:][:10]
                 emit(row)
         s.done()
     close()
+    lib.h1.report("jobui", ROWS, {"ui": UI, "roles": ROLES, "prefix": lib.PREFIX})
 
 
 if __name__ == "__main__":

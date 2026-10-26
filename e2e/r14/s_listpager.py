@@ -1,7 +1,10 @@
-"""e2e-12: the list pager (Previous/Next) of the Run Requests pending table with > 50 pending requests, as admin and approver-2."""
+"""e2e-12: the list pager (Previous/Next) of the Run Requests pending table with > 50 pending requests, as admin and approver-2.
+H1 (2026-10-24): judged at the end (ci/h1_rules.py judge_targeted "listpager"): 50 rows on page 1, Next and Previous
+present, page 2 has rows, Previous returns to the same first row."""
 import re
 from lib import Session, close, BASE
 import lib
+ROWS = []
 for role in ["admin", "approver-2"]:
     s = Session(role)
     s.go("/batch-control/requests/")
@@ -22,6 +25,7 @@ for role in ["admin", "approver-2"]:
             prv.first.click(); s.page.wait_for_load_state("load")
             row["back_first"] = s.page.locator("#main-panel table").first.locator("tbody tr").first.inner_text()[:50]
             row["back_same"] = row["back_first"] == row["first_p1"]
-    lib.log("listpager", row); print(row)
+    lib.log("listpager", row); print(row); ROWS.append(row)
     s.done()
 close()
+lib.h1.report("listpager", ROWS)
