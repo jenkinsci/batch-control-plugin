@@ -291,7 +291,7 @@ UNITS = [
     # widths for the owner) is not run here: `python r27/decision_tables.py Z` after the others. Weight: 39 to 46 s in
     # two runs through ci/run.sh with sections S and D and the hover guard (one on a fresh stack, one in its group;
     # 2026-10-16, local).
-    Unit("r27-decision-tables", 0.8, [("r27-decision-tables", py("r27/decision_tables.py", "AOPJBEXTLICSDQ"))],
+    Unit("r27-decision-tables", 0.8, [("r27-decision-tables", py("r27/decision_tables.py", "AOPJBREXTLICSDQ"))],
          group="job ui params and restart",
          doc="e2e-27 D3: the run request page's Decision right after Parameters with one comment box and Approve/Reject "
              "in one form (approve, reject, refused reject and approval with the form following the refused verb, "

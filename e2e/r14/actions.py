@@ -172,6 +172,10 @@ def exercise(role, kindkey, control):
             btn = f.locator("button[type=submit], input[type=submit], button:not([type])").nth(control.get("index", 0))
             with p.expect_navigation(timeout=15000) as nav:
                 btn.click()
+                # #93: the Reject button asks for confirmation first (skipped for a blank comment,
+                # which the server refuses anyway); confirm core's dialog so the form posts.
+                if control["label"].lower() == "reject" and opened(p, timeout=5000):
+                    p.locator("dialog[open] button[data-id=ok]").first.click()
             row["status"] = nav.value.status if nav.value else None
         p.wait_for_load_state("load")
         row["landing"] = p.url.replace(BASE, "")
