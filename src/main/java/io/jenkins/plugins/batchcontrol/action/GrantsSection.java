@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
+import hudson.model.AutoCompletionCandidates;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.ModelObject;
@@ -41,10 +42,12 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -387,6 +390,59 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                     + "named by a permission window; name the job it belongs to.");
         }
         return FormValidation.okWithMarkup(kindMarkup(kind, item.getFullName()));
+    }
+
+    /** The most full names offered for one keystroke in the item field. */
+    static final int MAX_SCOPE_SUGGESTIONS = 20;
+
+    /**
+     * GET {@code /batch-control/grants/autoCompleteScopeFullName} — the suggestions of the request
+     * form's item field: the full names of the jobs and folders that contain what the requester has
+     * typed so far, ignoring case, those that start with it first. Read-only, so it needs no POST; it
+     * needs the permission to request a window, like the item check.
+     *
+     * <p>Only items the caller may read are offered (Item/Read, as {@link Jenkins#allItems}
+     * applies it), and only items a window can name ({@link ItemKind#of}, which leaves out the parts
+     * of a job such as a matrix configuration), so a suggestion is never refused by
+     * {@link #doCheckScopeFullName} and an invisible item is not disclosed by being offered. An
+     * empty field gets no suggestions, and at most {@link #MAX_SCOPE_SUGGESTIONS} are offered.
+     */
+    // Read-only GET (autocomplete); REQUEST_GRANT is checked first and only readable items are offered.
+    @SuppressWarnings("lgtm[jenkins/csrf]")
+    public AutoCompletionCandidates doAutoCompleteScopeFullName(@QueryParameter String value) {
+        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST_GRANT);
+        AutoCompletionCandidates candidates = new AutoCompletionCandidates();
+        String typed = Util.fixEmptyAndTrim(value);
+        if (typed == null) {
+            return candidates;
+        }
+        String needle = typed.toLowerCase(Locale.ROOT);
+        for (String fullName : scopeSuggestions(Jenkins.get().allItems(Item.class), needle)) {
+            candidates.add(fullName);
+        }
+        return candidates;
+    }
+
+    /** The full names in {@code items} that contain {@code needle} (lower case), best first, capped. */
+    static List<String> scopeSuggestions(Iterable<? extends Item> items, String needle) {
+        List<String> starting = new ArrayList<>();
+        List<String> containing = new ArrayList<>();
+        for (Item item : items) {
+            String fullName = item.getFullName();
+            if (ItemKind.of(item) == null) {
+                continue;
+            }
+            String lower = fullName.toLowerCase(Locale.ROOT);
+            if (lower.startsWith(needle)) {
+                starting.add(fullName);
+            } else if (lower.contains(needle)) {
+                containing.add(fullName);
+            }
+        }
+        starting.sort(String.CASE_INSENSITIVE_ORDER);
+        containing.sort(String.CASE_INSENSITIVE_ORDER);
+        return Stream.concat(starting.stream(), containing.stream()).limit(MAX_SCOPE_SUGGESTIONS)
+                .collect(Collectors.toList());
     }
 
     /**

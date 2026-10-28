@@ -9,7 +9,9 @@
      followed name only to a requester who may read the item.
      D-71: a window names exactly one job or folder, so there is no scope type. The name field is
      checked as it is typed (POST GrantsSection#doCheckScopeFullName, with the crumb; the answer
-     is the item's kind with its icon, or "No such item" for a missing or invisible item); the
+     is the item's kind with its icon, or "No such item" for a missing or invisible item) and
+     completed from the full names of the items the requester may read (GET
+     GrantsSection#doAutoCompleteScopeFullName); the
      description says that a folder's own settings still reach its items (D-71a, S-34-02) and
      that the window follows its item when it is renamed or moved and ends when it is deleted
      (D-74); the actions say where each applies, and that no window includes renaming its item,
@@ -63,7 +65,8 @@
           <f:textbox name="scopeFullName" placeholder="team/folder/job"
                      value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"
                      checkUrl="${rootURL}/batch-control/grants/checkScopeFullName" checkDependsOn=""
-                     checkMethod="post"/>
+                     checkMethod="post"
+                     autoCompleteUrl="${rootURL}/batch-control/grants/autoCompleteScopeFullName"/>
           <bc:fieldError errors="${errors}" field="scopeFullName"/>
         </f:entry>
         <f:entry title="Actions"
