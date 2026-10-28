@@ -1,6 +1,6 @@
 """e2e-18: what changed in src/main after the e2e-17 build (bd449cd..d696d5d), checked in the browser.
 
-usage: python final.py [KMDAS] (D runs E)   rows: out/final.jsonl, shots: R18-*.png
+usage: python final.py [KMDAOS] (D runs E)   rows: out/final.jsonl, shots: R18-*.png
 Switches the global switches, revokes every window (change control off) and replaces the authorization strategy for a
 moment (S restores it), so ci/shard.py runs it as a `last` unit. Run r18/arrange.py first.
 
@@ -35,6 +35,10 @@ A  Change-recording baselines (D-76 (1), 14d4532, e66a852): the administrator tu
    while recording was off to the new one (never the one from before), shown on the History page (approver-1) and with
    its diff on the Changes tab. configurer changes the re-created r18/rec-c: its diff starts from the re-created item,
    not from the deleted one.
+O  Switches off (gap H2, SPEC item 1; r18/switches_off.py, which documents each check): with run control off the job
+   page offers core's Build Now (classic and new job page) and no Batch Control run UI, and a build by the button or a
+   direct POST runs; with change control off (run control on) no grant entry is offered on job and folder pages and
+   core configure/delete work, while run control still gates. Both switches are on again at its end.
 S  Strategy refusals as plain pages (8bfbe00, T-GAP-241): the administrator has the Batch Control configuration page
    open (Revert shown); in another browser context the administrator reverts (allowed). Pressing Revert on the page
    opened before answers HTTP 400 with "... is not a Batch Control strategy; there is nothing to revert." on core's
@@ -52,8 +56,10 @@ from lib import (Session, api, gv, check, note, J, BASE, run_sections, revoke_al
                  log_since, now_millis, mails, mail_text, wait_mail, set_switches, switches, records_for, history_changes,
                  configure_save, flat, console_ok, U, H, STACK_MARKERS, CONFIG)  # noqa: E402
 
+import switches_off  # noqa: E402  (section O, gap H2)
+
 lib.LOGNAME[0] = "final"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "KMDAS"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "KMDAOS"
 STATE = {}
 
 
@@ -531,4 +537,4 @@ j.setAuthorizationStrategy(s); j.save(); System.getProperties().remove('e2e18.st
 
 # ------------------------------------------------- the move into the vault needs the vault folder (arrange.py)
 if __name__ == "__main__":
-    run_sections(WANT, {"K": sec_K, "M": sec_M, "D": sec_D, "E": sec_E, "A": sec_A, "S": sec_S})
+    run_sections(WANT, {"K": sec_K, "M": sec_M, "D": sec_D, "E": sec_E, "A": sec_A, "O": switches_off.sec_O, "S": sec_S})

@@ -411,10 +411,13 @@ UNITS = [
                         "startup end of a vanished item, fail-closed restart re-end with an unreadable change log (S-39-02/03); "
                         "letter case after a restart (own step); reloads and restarts Jenkins (last)"),
     # e2e-18 (bd449cd..d696d5d). r18/arrange.py is idempotent and self-contained (account w18, items r18*).
-    Unit("r18-final", 2.2, [("r18-arrange", py("r18/arrange.py")), ("r18-final", py("r18/final.py", "KMDAS"))],
+    # Section O (gap H2, 2026-10-26): the switches-off checks of SPEC item 1 (r18/switches_off.py), between A and S. It
+    # added about 40 s (local fresh runs: arrange 27 s, final 140 s with O), so the weight went from 2.2 to 2.8.
+    Unit("r18-final", 2.8, [("r18-arrange", py("r18/arrange.py")), ("r18-final", py("r18/final.py", "KMDAOS"))],
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
-                        "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
-                        "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
+                        "approval refused while change control is off, recording baselines (D-76 (1)), switches off "
+                        "(gap H2: core Build Now and no grant UI per switch), strategy migrate/revert refusals; switches "
+                        "the switches and the authorization strategy (last)"),
     # e2e-23 R1-02 (bug-hunt batch A, D-81). r23/history_late.py arranges its own items (r23-late-slow, r23-late-fast),
     # shifts the plugin clock's zone and installs a holding RunListener, and restores both at its end.
     Unit("r23-history-late", 1.6, [("r23-history-late", py("r23/history_late.py"))], group="runs and switches",

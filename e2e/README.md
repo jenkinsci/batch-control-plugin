@@ -512,6 +512,9 @@ ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`,
 `r_role.py` (applies `casc/profile-role.yaml` through the CasC page and back), plus copies of
 `r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
 `arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
+`c_switch.py` only printed what it saw; section O of `r18/final.py` (`r18/switches_off.py`, gap H2, CI unit
+`r18-final`) asserts the same ground: core's Build Now and a running build with run control off, no grant entries and
+core configure/delete with change control off, and the other switch still in force.
 
 ## e2e-11 driver (`r11/`)
 
