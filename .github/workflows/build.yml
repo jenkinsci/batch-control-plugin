@@ -31,11 +31,13 @@ permissions:
 # Concurrency, by event (see #88): push runs are keyed by commit SHA, so every push to
 # main gets its own complete run instead of replacing a pending one (the same ref-keyed
 # flaw as windows-tests.yml); pull-request runs stay keyed by PR number, so a new push to
-# the PR still replaces the unfinished run; manual runs are keyed by SHA plus the event
-# name, so they no longer share a group with push runs.
+# the PR still replaces the unfinished run; manual runs are keyed by ref, so a new manual
+# run on the same branch replaces the unfinished one while still sharing no group with
+# push runs. cancel-in-progress is off for push runs only, so a manual run replaces a
+# manual run but never a push run.
 concurrency:
-  group: build-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: build-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.ref) || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   plan:
@@ -75,15 +77,24 @@ jobs:
       # plus compilation of the test sources. Tests run in the test jobs.
       # Retry once on a transient artifact-resolution failure, as in the test jobs (#88):
       # only a resolution error retries, so a real check failure still fails at once.
+      # The two-attempt loop keeps a single copy of the command, so the retry cannot
+      # drift from the first attempt.
       - name: Build and check (tests skipped)
         run: |
+          attempt=0
           status=0
-          mvn -B -ntp clean verify -DskipTests 2>&1 | tee maven.log || status=$?
-          if [ "$status" -ne 0 ] && grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
-            echo "Maven failed on artifact resolution; retrying once (see #88)"
+          while [ "$attempt" -lt 2 ]; do
+            attempt=$((attempt + 1))
             status=0
             mvn -B -ntp clean verify -DskipTests 2>&1 | tee maven.log || status=$?
-          fi
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+              break
+            fi
+            echo "Maven failed on artifact resolution; retrying once (see #88)"
+          done
           exit "$status"
 
   test:
@@ -107,18 +118,27 @@ jobs:
       # verify, which this job does not reach. The enforcer rules take seconds and the
       # parent POM does not honour -Denforcer.skip, so they run here too.
       # Retry once on a transient artifact-resolution failure (#88): only a resolution
-      # error retries, so a real test failure still fails the step at once.
+      # error retries, so a real test failure still fails the step at once. The
+      # two-attempt loop keeps a single copy of the command, so the retry cannot drift
+      # from the first attempt.
       - name: Test
         env:
           GROUP_TESTS: ${{ matrix.tests }}
         run: |
+          attempt=0
           status=0
-          mvn -B -ntp clean test -Dtest="$GROUP_TESTS" -Daccess-modifier-checker.skip=true 2>&1 | tee maven.log || status=$?
-          if [ "$status" -ne 0 ] && grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
-            echo "Maven failed on artifact resolution; retrying once (see #88)"
+          while [ "$attempt" -lt 2 ]; do
+            attempt=$((attempt + 1))
             status=0
             mvn -B -ntp clean test -Dtest="$GROUP_TESTS" -Daccess-modifier-checker.skip=true 2>&1 | tee maven.log || status=$?
-          fi
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+              break
+            fi
+            echo "Maven failed on artifact resolution; retrying once (see #88)"
+          done
           exit "$status"
       - name: Check that the group ran exactly its classes
         env:
