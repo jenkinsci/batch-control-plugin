@@ -45,10 +45,17 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request, or a new manual run on the same ref, replaces the unfinished
-# run; every push to main gets its own complete run.
+# Concurrency, by event (see #88):
+# - push: keyed by commit SHA, so every push to main gets its own complete run. A
+#   ref-keyed group lost the middle run: with one run in progress and one pending, a
+#   third push replaced the pending run.
+# - pull_request: keyed by PR number, so a new push to the PR still replaces the
+#   unfinished run.
+# - workflow_dispatch: keyed by ref, so a new manual run on the same branch replaces
+#   the unfinished one (gh workflow run --ref <branch> iteration). Push runs stay in
+#   their own SHA-keyed group, so a manual run still cannot cancel a push run.
 concurrency:
-  group: windows-tests-${{ github.event.pull_request.number || github.ref }}
+  group: windows-tests-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.ref) || github.sha }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
@@ -100,15 +107,33 @@ jobs:
       # Same command as build.yml's test job, plus failure.ignore so that a failing test
       # does not stop the group: the summary job decides. The step timeout is shorter than
       # the job's so that the reports of a slow group are still uploaded.
+      # A single group can fail before any test when Maven cannot resolve an artifact it
+      # only needs at run time (the git-changelist extension, a Surefire provider: #88);
+      # re-runs pass for these failures, so retry the Maven invocation once when it fails
+      # with a resolution error — and only then. A real test failure still ends the step
+      # at once, because failure.ignore makes Maven exit 0 when tests fail. The
+      # two-attempt loop keeps a single copy of the command, so the retry cannot drift
+      # from the first attempt.
       - name: Test
         timeout-minutes: 75
         env:
           GROUP_TESTS: ${{ matrix.tests }}
-        run: >-
-          mvn -B -ntp clean test
-          -Dtest="$GROUP_TESTS"
-          -Daccess-modifier-checker.skip=true
-          -Dmaven.test.failure.ignore=true
+        run: |
+          attempt=0
+          status=0
+          while [ "$attempt" -lt 2 ]; do
+            attempt=$((attempt + 1))
+            status=0
+            mvn -B -ntp clean test -Dtest="$GROUP_TESTS" -Daccess-modifier-checker.skip=true -Dmaven.test.failure.ignore=true 2>&1 | tee maven.log || status=$?
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+              break
+            fi
+            echo "Maven failed on artifact resolution; retrying once (see #88)"
+          done
+          exit "$status"
       - name: Upload surefire reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
