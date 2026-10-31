@@ -1,6 +1,6 @@
 """e2e-19: the run request life cycle as people meet it in the browser, with the e-mail it sends (SPEC 3, 4, 7, 12).
 
-usage: python lifecycle.py [VDCSEXBF]   rows: out/lifecycle.jsonl, shots: R19-LIFE-*.png   (run r19/arrange.py first)
+usage: python lifecycle.py [VDCSEXBFM]   rows: out/lifecycle.jsonl, shots: R19-LIFE-*.png   (run r19/arrange.py first)
 V  form validation on the Request Run page (requester): an empty reason and a reason over 4,000 characters are refused
    next to the field with the input kept and nothing stored; designating a user who is not on the approver list (REST)
    is refused with a message naming it, nothing stored (SPEC 3, 4)
@@ -26,7 +26,17 @@ X  disabled job: while r19-dis is disabled the decision form says so, has no App
 B  a request by reqonly (Request without Item/Build): the request page tells approver-1 that the requester does not
    have Build permission on this job (SPEC 6 D-38a)
 F  requests.csv: a reason starting with = and a comment starting with @ are exported with a ' prefix (SPEC 10 R-3); the
-   approver column holds the designated set joined by ';' and decidedBy is the last column (SPEC 12 D-37)"""
+   approver column holds the designated set joined by ';' and decidedBy is the last column (SPEC 12 D-37)
+M  M11 (gap audit 2026-10, SPEC 13), the notices no other step asserted, as the real Mailer sends them: EXPIRING (the
+   pending-request reminder): with notifyBeforeExpiryMinutes above the pending timeout every new pending request is
+   inside the reminder lead at once, so the periodic work (every minute) owes it one "Pending request expires soon"
+   mail; the requester gets exactly one for the first request (with request id, job, requester and link), also after a
+   later pass of the periodic work (proved by the reminder of a second request filed after the first reminder, and by
+   the cancel mails of both, which the single dispatch thread sends after anything queued before them), the stored
+   request is marked notified, and the designated approver gets none; the lead is put back. INVALIDATED: a pending
+   request whose job the administrator deletes ends INVALIDATED and the requester gets "Request invalidated" naming the
+   job, with "Why it ended". (The run request APPROVED mail is asserted in E; the requester-lacks-Build line of the
+   approver's mail in B.)"""
 import re
 import sys
 import time
@@ -37,7 +47,7 @@ from lib import (Session, api, gv, check, note, text_of, J, run_sections, run_re
                  queue_items, wait_build, wait_executed, wait_until, browser_decide, tick, mails, mail_text, BASE)  # noqa: E402
 
 lib.LOGNAME[0] = "lifecycle"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "VDCSEXBF"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "VDCSEXBFM"
 JOB = "r19-life"
 
 
@@ -224,6 +234,12 @@ def sec_E():
         st, rid, _ = run_req("requester", job, "e2e-19 approved run that expires")
         assert rid, st
         assert lib.decide("approver-1", "requests", rid, "approve") in (200, 302)
+        m = mail_for("requester@e2e.local", rid, "Request approved")
+        body = mail_text(m["id"]) if m else ""
+        check("E", "M11 (SPEC 13): the requester got the run request's 'Request approved' mail with the request id, job, "
+              "requester and link", m is not None and f"Request: {rid} (run request)" in body and f"Job: {job}" in body
+              and "Requester: requester" in body and re.search(r"^Link: http\S+/batch-control/requests/" + rid, body, re.M),
+              subject=(m or {}).get("subject"), body=body[:300])
         s = Session("requester")
         s.go(f"/batch-control/requests/{rid}/")
         t = s.text()
@@ -329,4 +345,73 @@ def sec_F():
           header=head, approver=col("approver"), decidedBy=col("decidedBy"))
 
 
-run_sections(WANT, {"F": sec_F, "V": sec_V, "D": sec_D, "C": sec_C, "S": sec_S, "E": sec_E, "X": sec_X, "B": sec_B})
+def lead(minutes=None):
+    """Arrangement (script console): notifyBeforeExpiryMinutes, set and saved when `minutes` is given, and
+    pendingTimeoutHours; returns (lead minutes, pending timeout hours) afterwards."""
+    out = gv("def cfg = io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.get()\n" + (f"cfg.setNotifyBeforeExpiryMinutes({int(minutes)}); cfg.save()\n" if minutes else "")
+             + "return cfg.notifyBeforeExpiryMinutes + ',' + cfg.pendingTimeoutHours")
+    a, b = out.split(",")
+    return int(a), int(b)
+
+
+def expiring_mails(to, rid):
+    return [m for m in mails(to) if "Pending request expires soon" in m["subject"] and rid in m["subject"]]
+
+
+def sec_M():
+    before, hours = lead()
+    rids = []
+    try:
+        set_to, _ = lead(hours * 60 + 10)
+        st, r1, _ = run_req("requester", JOB, "e2e-19 M11 pending reminder (first)")
+        assert r1, st
+        rids.append(r1)
+        m1 = mail_for("requester@e2e.local", r1, "Pending request expires soon", timeout=150)
+        st, r2, _ = run_req("requester", JOB, "e2e-19 M11 pending reminder (second, after the first reminder)")
+        assert r2, st
+        rids.append(r2)
+        m2 = mail_for("requester@e2e.local", r2, "Pending request expires soon", timeout=150)
+    finally:
+        back = lead(before)
+    body = mail_text(m1["id"]) if m1 else ""
+    flagged = gv(f"""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/requests/run/{r1}.xml')
+return new XmlSlurper().parse(f).expiringNotified.text()""")
+    check("M", "M11 (SPEC 13 EXPIRING): with notifyBeforeExpiryMinutes above the pending timeout the requester gets the "
+          "'Pending request expires soon' mail for a pending request, with the request id, job, requester and link, and "
+          "the stored request is marked notified; the lead is put back",
+          set_to == hours * 60 + 10 and m1 is not None and "Pending request expires soon" in body
+          and f"Request: {r1} (run request)" in body and f"Job: {JOB}" in body and "Requester: requester" in body
+          and re.search(r"^Link: http\S+/batch-control/requests/" + r1, body, re.M) and flagged == "true"
+          and back == (before, hours), lead=set_to, pending_hours=hours, restored=back, before=before, flagged=flagged,
+          subject=(m1 or {}).get("subject"), body=body[:300])
+    # a later pass of the periodic work has run (the second request's reminder) with the first request still PENDING;
+    # then both are cancelled: their cancel mails to the approver leave the single dispatch thread after anything that
+    # pass queued
+    cancels = {r: lib.decide("requester", "requests", r, "cancel") for r in rids}
+    sentinels = {r: mail_for("approver-1@e2e.local", r, "Request cancelled", timeout=60) is not None for r in rids}
+    counts = {r: len(expiring_mails("requester@e2e.local", r)) for r in rids}
+    approver = {r: len(expiring_mails("approver-1@e2e.local", r)) for r in rids}
+    check("M", "M11 (SPEC 13 'EXPIRING fires once for a pending request'): after a later pass of the periodic work (the "
+          "second request's reminder) and the cancel mails of both, the requester holds exactly one reminder per request "
+          "and the designated approver none", m2 is not None and all(sentinels.values()) and counts == {r: 1 for r in rids}
+          and approver == {r: 0 for r in rids}, second=(m2 or {}).get("subject"), cancels=cancels, sentinels=sentinels,
+          requester_reminders=counts, approver_reminders=approver)
+    # INVALIDATED: the job of a pending request is deleted
+    job = "r19-life-inv"
+    lib.ensure_job(job, lib.job_xml("fs", shell="echo e2e-19 M11"))
+    prop = lib.set_property(job, approval=True)
+    st, rid, _ = run_req("requester", job, "e2e-19 M11 invalidated by the deletion")
+    assert rid, st
+    deleted = api("admin", J(job) + "/doDelete", "POST").status_code
+    end = wait_until(lambda: request_state(rid)[1] == "INVALIDATED", 30, 2)
+    m = mail_for("requester@e2e.local", rid, "Request invalidated")
+    body = mail_text(m["id"]) if m else ""
+    why = re.search(r"^Why it ended: (.+)$", body, re.M)
+    check("M", "M11 (SPEC 13 INVALIDATED, D-54): the administrator deletes the job of a pending request: it is INVALIDATED "
+          "and the requester gets 'Request invalidated' with the request id, the job and why it ended",
+          "approvalRequired=true" in prop and deleted in (200, 302) and end and m is not None
+          and f"Request: {rid} (run request)" in body and f"Job: {job}" in body and why is not None,
+          deleted=deleted, status=request_state(rid)[1], subject=(m or {}).get("subject"), body=body[:400])
+
+
+run_sections(WANT, {"F": sec_F, "V": sec_V, "D": sec_D, "C": sec_C, "S": sec_S, "E": sec_E, "X": sec_X, "B": sec_B, "M": sec_M})

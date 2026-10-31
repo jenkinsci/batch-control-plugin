@@ -750,6 +750,35 @@ def judge_misc(rows, ctx=None):
 
 
 # ------------------------------------------------------------------ targeted (errpages, listpager, incident, help, monitor)
+def incident_m4(r):
+    """M4 (gap audit 2026-10, SPEC 11): the incident's state machine through its browser forms, as s_incident.py records
+    it for one role. Returns {field: value} of what is wrong ({} when all holds): before anything is pressed the Status
+    row says Open, the page offers Acknowledge and Add Comment but no Resolve, and the store says OPEN; Add Comment
+    answers 200, keeps the status and adds a History row by the role with the comment; Acknowledge answers 200, the
+    Status row says Acknowledged, Acknowledge is gone and Resolve offered, the store says ACKNOWLEDGED; Resolve answers
+    200, the store says RESOLVED and the History ends with the Acknowledged and Resolved rows by the role with their
+    comments."""
+    role, comment = r.get("role"), f"comment by {r.get('role')} e2e-12"
+    before, after_ack = r.get("forms_before") or [], r.get("after_ack_forms") or []
+    hist_c, hist_r = r.get("history_after_comment") or [], r.get("history_after_resolve") or []
+    want = {
+        "state_before": r.get("state_before") == "Open",
+        "forms_before": "acknowledge" in before and "addComment" in before and "resolve" not in before,
+        "stored_before": r.get("stored_before") == "OPEN",
+        "comment_status": r.get("comment_status") == 200,
+        "state_after_comment": r.get("state_after_comment") == "Open",
+        "history_after_comment": any(len(h) == 3 and h[1] == role and h[2] == comment for h in hist_c),
+        "ack_status": r.get("ack_status") == 200,
+        "state_after_ack": r.get("state_after_ack") == "Acknowledged",
+        "after_ack_forms": "acknowledge" not in after_ack and "resolve" in after_ack,
+        "stored_after_ack": r.get("stored_after_ack") == "ACKNOWLEDGED",
+        "resolve_status": r.get("resolve_status") == 200,
+        "stored_after_resolve": r.get("stored_after_resolve") == "RESOLVED",
+        "history_after_resolve": hist_r[-2:] == [["Acknowledged", role, "ack"], ["Resolved", role, "resolved e2e-12"]],
+    }
+    return {k: r.get(k) for k, ok in want.items() if not ok}
+
+
 def judge_targeted(name, rows, ctx=None):
     j = Judge(name, ctx)
     for r in rows:
@@ -766,10 +795,20 @@ def judge_targeted(name, rows, ctx=None):
             if r.get("case") == "rerun validation":
                 if r.get("status") != 400 or "Check at least one approver." not in (r.get("errors") or []):
                     j.fail("rerun-validation", {k: r.get(k) for k in ("status", "url", "errors")})
+                # M4 (2026-10-31): the refusal is the incident's own page again (Status row, the rerun form offered
+                # again) and links no rerun request. Rows recorded before M4 have no reruns_after and are not judged.
+                if "reruns_after" in r and (r.get("state_after_refusal") != "Open" or "rerun" not in (r.get("forms_after_refusal") or [])
+                                            or r.get("reruns_after") != r.get("reruns_before") or r.get("reruns_after") != []):
+                    j.fail("rerun-refusal-state", {k: r.get(k) for k in ("state_after_refusal", "forms_after_refusal",
+                                                                         "reruns_before", "reruns_after")})
             elif (r.get("comment_visible") is not True or "resolve" not in (r.get("after_ack_forms") or [])
                   or r.get("state_after_resolve") != "Resolved" or "resolve" in (r.get("forms_after_resolve") or ["resolve"])):
                 j.fail("incident", {k: r.get(k) for k in ("role", "comment_visible", "after_ack_forms", "state_after_resolve",
                                                           "forms_after_resolve")})
+            if r.get("case") != "rerun validation" and "state_before" in r:  # M4 (2026-10-31; rows before it: not judged)
+                bad = incident_m4(r)
+                if bad:
+                    j.fail("incident-m4", {"role": r.get("role"), "id": r.get("id"), "wrong": bad})
         elif name == "help":
             for h in r.get("helps") or []:
                 if h.get("status") != 200 or (h.get("chars") or 0) < 20 or h.get("expands") is not True:

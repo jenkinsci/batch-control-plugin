@@ -1,10 +1,15 @@
 """e2e-19: the run gate on a real Jenkins, every manual path and the approved run (SPEC item 6; e2e-19 gap audit G-01..G-06).
 
-usage: python gate.py [BPARXM]   rows: out/gate.jsonl, shots: R19-GATE-*.png   (run r19/arrange.py first)
+usage: python gate.py [BCPARXM]   rows: out/gate.jsonl, shots: R19-GATE-*.png   (run r19/arrange.py first)
 B  job page of the approval-required r19-gate: requester sees "Request Run" and no core Build entry, and the notice
    "manual runs of this job need an approved run request" with a link to the job's request form (SPEC 6 "Build Now is
    replaced by Request Run", D-60 notice, DEF-01/02); nobc (Item/Build, no Batch Control permission) sees the notice
    without the link and is told whom to ask
+C  M12 (gap audit 2026-10, SPEC 6 "Build Now is replaced by Request Run"), section B on the classic job page: with the
+   requester's new job page flag set to false (the setting the classic passes of the suite use), the page is the classic
+   one (core's side panel #tasks) and its side panel offers "Request Run" (linking the job's request form) and no core
+   "Build Now" / "Build with Parameters", nor anywhere else on the page; with the flag true (the new job page) the page
+   has no such side panel and still offers Request Run and no core Build entry; the flag is put back afterwards
 P  every other manual path is refused and nothing reaches the queue (SPEC 6 first acceptance line): as requester
    (Item/Build) POST buildWithParameters and POST build with a json payload (REST, basic auth), the CLI `build`
    command, the job's build token anonymously on buildWithParameters and through build-token-root's /buildByToken;
@@ -35,7 +40,7 @@ from lib import (Session, api, gv, check, note, text_of, J, run_sections, run_re
                  wait_build, wait_executed, browser_decide, cli, changes_mark, changes_since, sha, BASE)  # noqa: E402
 
 lib.LOGNAME[0] = "gate"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "BPARXM"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "BCPARXM"
 JOB = "r19-gate"
 SECRET = "r19-Gate-Secret-3"
 STATE = {}
@@ -73,6 +78,51 @@ def sec_B():
           and ("Ask a user who may submit run requests" in t or "administrator" in t),
           batch_control_links=[h for h in links if "batch-control" in (h or "")][:3])
     s.done()
+
+
+def job_page_flag(user, value=None):
+    """Arrangement (as r14/set_flag.py): the new job page experimental flag of `user` (true = new page, false = classic),
+    set when `value` is given; returns its value afterwards."""
+    setter = ("def m = new HashMap(); m.put('new-job-page.flag', " + json.dumps(value) + ")\n"
+              "u.addProperty(new UserExperimentalFlagsProperty(m)); u.save()\n") if value is not None else ""
+    return gv("import jenkins.model.experimentalflags.*\ndef u = hudson.model.User.getById(" + json.dumps(user) + ", true)\n"
+              + setter + "return String.valueOf(new NewJobPageUserExperimentalFlag().getFlagValue(u))")
+
+
+SIDE_JS = """() => { const n = t => (t || '').replace(/\\s+/g, ' ').trim();
+  const tasks = document.querySelector('#side-panel #tasks, #tasks');
+  return {tasks: !!tasks, side: tasks ? [...tasks.querySelectorAll('a, button')].filter(e => e.getClientRects().length)
+    .map(e => [n(e.innerText || e.getAttribute('aria-label') || ''), e.getAttribute('href')]) : []}; }"""
+
+
+def sec_C():
+    before = job_page_flag("requester")
+    try:
+        for value, ui in (("false", "classic"), ("true", "new")):
+            now = job_page_flag("requester", value)
+            s = Session("requester")
+            s.go(J(JOB) + "/")
+            side = s.page.evaluate(SIDE_JS)
+            body = s.page.locator("body").inner_text()
+            s.shot("body", f"R19-GATE-C-0{1 if ui == 'classic' else 2}-requester-job-{ui}")
+            s.done()
+            core_build = re.findall(r"\bBuild (?:Now|with Parameters)\b", body)
+            labels = [x[0] for x in side["side"]]
+            if ui == "classic":
+                request = [x for x in side["side"] if x[0] == "Request Run"]
+                check("C", "M12 (SPEC 6): classic job page (requester's flag false): core's side panel offers 'Request Run', "
+                      "linking the job's request form, and no core 'Build Now' / 'Build with Parameters', nor does the rest "
+                      "of the page", now == "false" and side["tasks"] and len(request) == 1
+                      and (request[0][1] or "").rstrip("/").endswith(J(JOB) + "/batch-control")
+                      and not [x for x in labels if re.match(r"Build (Now|with Parameters)\b", x)] and not core_build,
+                      flag=now, side=side["side"][:14], request=request, core_build=core_build[:3])
+            else:
+                check("C", "guard: new job page (requester's flag true): no classic side panel, the page still offers "
+                      "Request Run and no core Build entry", now == "true" and not side["side"] and "Request Run" in body
+                      and not core_build, flag=now, side=side["side"][:6], core_build=core_build[:3])
+    finally:
+        back = job_page_flag("requester", before)
+        note("C", "the requester's new job page flag put back", before=before, after=back)
 
 
 def sec_P():
@@ -272,4 +322,4 @@ catch (Throwable e) {{ return 'refused: ' + e.class.simpleName + ': ' + e.messag
     check("M", "changes.csv has the record (D-30)", csv.status_code == 200 and rows, status=csv.status_code, rows=rows[:1])
 
 
-run_sections(WANT, {"B": sec_B, "P": sec_P, "A": sec_A, "R": sec_R, "X": sec_X, "M": sec_M})
+run_sections(WANT, {"B": sec_B, "C": sec_C, "P": sec_P, "A": sec_A, "R": sec_R, "X": sec_X, "M": sec_M})

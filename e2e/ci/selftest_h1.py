@@ -319,6 +319,47 @@ def _menu(p, hover_items, click_items, boxes_after=2, legacy=None):
             "duplicates": [], "empty_href_anchors": [], "clicks": {"Permalinks": c}, "console": [], "bad": []}
 
 
+def _incident(change=None, role="admin"):
+    """A row of r14/s_incident.py with the M4 fields (2026-10-31) as a correct run records it; `change` replaces fields."""
+    c = f"comment by {role} e2e-12"
+    r = {"role": role, "id": "20261031-120000-abc123", "state_before": "Open", "forms_before": ["acknowledge", "addComment", "rerun"],
+         "stored_before": "OPEN", "comment_status": 200, "comment_visible": True,
+         "history_after_comment": [["Open", "SYSTEM", ""], ["Open", role, c]], "state_after_comment": "Open", "ack_status": 200,
+         "state_after_ack": "Acknowledged", "after_ack_forms": ["resolve", "addComment", "rerun"], "stored_after_ack": "ACKNOWLEDGED",
+         "resolve_status": 200, "state_after_resolve": "Resolved", "forms_after_resolve": ["addComment", "rerun"],
+         "history_after_resolve": [["Open", "SYSTEM", ""], ["Open", role, c], ["Acknowledged", role, "ack"],
+                                   ["Resolved", role, "resolved e2e-12"]], "stored_after_resolve": "RESOLVED"}
+    r.update(change or {})
+    return r
+
+
+def _rerun_refusal(change=None):
+    r = {"case": "rerun validation", "id": "20261031-120100-def456", "status": 400, "errors": ["Check at least one approver."],
+         "reruns_before": [], "state_after_refusal": "Open", "forms_after_refusal": ["acknowledge", "addComment", "rerun"],
+         "reruns_after": []}
+    r.update(change or {})
+    return r
+
+
+INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
+    ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
+    ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
+    ("the Status row not Open before anything is pressed", {"state_before": "Acknowledged"}),
+    ("the store not OPEN before anything is pressed", {"stored_before": "ACKNOWLEDGED"}),
+    ("Add Comment answered 403", {"comment_status": 403}),
+    ("the comment changed the status", {"state_after_comment": "Acknowledged"}),
+    ("the comment not in the History by the role", {"history_after_comment": [["Open", "SYSTEM", ""]]}),
+    ("Acknowledge answered 500", {"ack_status": 500}),
+    ("the Status row not Acknowledged after the acknowledgement", {"state_after_ack": "Open"}),
+    ("Acknowledge still offered after the acknowledgement", {"after_ack_forms": ["acknowledge", "resolve", "addComment"]}),
+    ("the store not ACKNOWLEDGED after the acknowledgement", {"stored_after_ack": "OPEN"}),
+    ("Resolve answered 400", {"resolve_status": 400}),
+    ("the store not RESOLVED after the resolution", {"stored_after_resolve": "ACKNOWLEDGED"}),
+    ("the History lacks the Resolved row with its comment", {"history_after_resolve": [["Acknowledged", "admin", "ack"],
+                                                                                         ["Resolved", "admin", ""]]}),
+]
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -487,6 +528,21 @@ def synthetic():
          [_paged("/batch-control/changes/", False, 6)], {}, "fail", "P-paging"),
         ("misc: a list no timer writes to (changes) restored exactly", "misc",
          [_paged("/batch-control/changes/", True, 0, above=[])], {}, "pass", None),
+        # incident M4 (2026-10-31): the state machine through the forms; the refused rerun stays on the incident
+        ("incident: Open -> comment -> Acknowledged -> Resolved through the forms", "incident", [_incident()], {}, "pass", None),
+        ("incident: the same for approver-1", "incident", [_incident(role="approver-1")], {}, "pass", None),
+        ("incident: a row recorded before M4 (no M4 fields) is judged as before", "incident",
+         [{k: v for k, v in _incident().items() if k in ("role", "comment_visible", "after_ack_forms", "state_after_resolve",
+                                                          "forms_after_resolve")}], {}, "pass", None),
+    ] + [(f"not hidden: incident M4, {what}", "incident", [_incident(change)], {}, "fail", "incident-m4")
+         for what, change in INCIDENT_M4_BREAKS] + [
+        ("incident: the refused rerun stays on the incident page, nothing linked", "incident", [_rerun_refusal()], {}, "pass", None),
+        ("not hidden: the refused rerun linked a rerun request", "incident", [_rerun_refusal({"reruns_after": ["x"]})], {}, "fail",
+         "rerun-refusal-state"),
+        ("not hidden: the refused rerun's page lost the rerun form", "incident",
+         [_rerun_refusal({"forms_after_refusal": ["acknowledge", "addComment"]})], {}, "fail", "rerun-refusal-state"),
+        ("not hidden: the refused rerun's page is not the incident (no Status row)", "incident",
+         [_rerun_refusal({"state_after_refusal": None})], {}, "fail", "rerun-refusal-state"),
         ("actions: nobc may open a run request (200 where 404)", "actions",
          [{"role": "nobc", "item": "run", "probe_status": 200, "controls": []}], {}, "fail", "probe"),
         ("misc: nobc reads the History (200 where 404)", "misc", [{"sec": "H", "role": "nobc", "status": 200}], {}, "fail", "H-status"),

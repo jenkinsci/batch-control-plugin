@@ -84,7 +84,12 @@ W  a window that has ended (SPEC 8 D-74, D-75 (1); the windows are opened in A).
    (revoked) and late-er (expired) are renamed only after their windows ended; a window follows its item only while it
    applies, so the stored window, the Scope row and the title all keep the name the window ended with for the
    requester, approver-disc and admin, and the later name is in none of them (nor in approver-disc's HTML).
-S  #18.4 requests that ran or expired: the run request approved in A on the activated job is EXECUTED; the run, window
+   M1 (gap audit 2026-10, SPEC 8 and D-33), on end-exp: the requester reached its configure page while the window was
+   open (A); as soon as the store shows it past its expiry with no revocation written, the configure page and
+   configSubmit answer core's 403 and the permission check says no; the requester's grants page lists it once under
+   Ended as "Expired" with a "Request again" dialog opener, whose dialog is prefilled (the followed item, Configure
+   only, the "Prefilled from ended grant" note, an empty reason) and, submitted, files a new PENDING request.
+S#18.4 requests that ran or expired: the run request approved in A on the activated job is EXECUTED; the run, window
    and ACTIVATE requests on r27-d1/exp, made an hour older than pendingTimeoutHours in the store in A (the setting's
    minimum is 1 hour and CI sets 24, so waiting cannot do it), were expired by the plugin's periodic work. Titles and
    ID rows as everywhere else.
@@ -271,6 +276,24 @@ return groovy.json.JsonOutput.toJson(""" + json.dumps(list(users)) + """.collect
   [u, i != null && i.getACL().hasPermission2(User.getById(u, true).impersonate2(), Item.READ)] })""")
 
 
+def may(item, users, permission):
+    """Server state: who of `users` holds Item/<permission> (READ, CONFIGURE, ...) on `item` now, as the installed
+    strategy answers a permission check (false when the item does not exist)."""
+    return lib.facts("""import hudson.model.*
+def i = jenkins.model.Jenkins.get().getItemByFullName(""" + json.dumps(item) + """)
+return groovy.json.JsonOutput.toJson(""" + json.dumps(list(users)) + """.collectEntries { u ->
+  [u, i != null && i.getACL().hasPermission2(User.getById(u, true).impersonate2(), Item.""" + permission + """)] })""")
+
+
+def window_end(rid):
+    """Server state (M1): how the permission window of grant request `rid` stands against the controller's clock:
+    revoked (a revocation was written), expired (its expiry time has passed) and the milliseconds since its expiry."""
+    return lib.facts("""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/grants/""" + rid + """.xml')
+if (!f.exists()) return '{}'
+def x = new XmlSlurper().parse(f); def now = System.currentTimeMillis(); def exp = (x.expiresAtMillis.text() ?: '0') as long
+return groovy.json.JsonOutput.toJson([revoked: x.revokedAtMillis.text() != '', expired: exp <= now, sinceExpiry: now - exp])""")
+
+
 def ensure_vault():
     """Arrangement (as r18/arrange.py): the folder r27-d1-vault, whose matrix blocks inheritance, so that only
     administrators read what is inside (D-75 (1))."""
@@ -398,6 +421,9 @@ def sec_A():
         rid = S["grant_end_" + k][1]
         S["ended_" + k] = (lib.decide("approver-1", "grants", rid, "approve", "e2e-27 D1") if rid else None,
                            rename(old, new.rsplit("/", 1)[1]), window_of(rid) if rid else None)
+        if k == "exp":  # M1: while the one-minute window is open its holder reaches the configuration (section W)
+            S["exp_open"] = {"configure": api("requester", lib.jpath(new) + "/configure").status_code,
+                             "may": may(new, ("requester",), "CONFIGURE"), "window": window_end(rid) if rid else None}
     # Also for section W: two windows whose items are renamed only after the windows ended (late-er lasts one minute).
     S["late_removed"] = remove(*[n for pair in LATE.values() for n in pair])
     for k, (old, new) in LATE.items():
@@ -855,6 +881,106 @@ def sec_X():
 
 
 # ---------------------------------------------------------------- W: a window that ended after its item was renamed
+def expired_refuses(rid):
+    """M1 (SPEC 8 "refused from the first permission check after the expiry time, no timer", D-33 "the denial page is
+    core's"): right after the store shows end-exp's one-minute window past its expiry, with no revocation written,
+    its holder is refused the configuration it reached while the window was open (section A): core's 403 on the
+    configure page and on configSubmit, and the strategy's permission check says no."""
+    item = ENDED["exp"][1]
+    end = window_end(rid)
+    configure = api("requester", lib.jpath(item) + "/configure")
+    submit = api("requester", lib.jpath(item) + "/configSubmit", "POST", data={"json": "{}"})
+    now = may(item, ("requester",), "CONFIGURE")
+    check("W", "M1 (SPEC 8, D-33): the holder of end-exp's CONFIGURE window reached its configure page while it was open "
+          "(200, Item/Configure granted); once its expiry time has passed (nothing revoked it: no revocation is "
+          "written) the first checks refuse: the configure page and configSubmit answer core's 403 and the permission "
+          "check says no", (S.get("exp_open") or {}).get("configure") == 200
+          and (S.get("exp_open") or {}).get("may") == {"requester": True}
+          and end.get("expired") is True and end.get("revoked") is False
+          and configure.status_code == 403 and submit.status_code == 403 and now == {"requester": False}
+          and "Access Denied" in lib.text_of(configure.text),
+          open=S.get("exp_open"), window=end, configure=configure.status_code, config_submit=submit.status_code,
+          may_configure=now, denied=lib.text_of(configure.text)[:160])
+
+
+ENDED_ROW_JS = """(row) => { const n = t => (t || '').replace(/\\s+/g, ' ').trim(); const td = [...row.querySelectorAll(':scope > td')];
+  const again = [...row.querySelectorAll('button, a')].filter(b => n(b.textContent) === 'Request again');
+  return {cells: td.map(c => n(c.innerText)), again: again.map(b => ({tag: b.tagName.toLowerCase(),
+    type: b.getAttribute('data-type'), url: b.getAttribute('data-dialog-url')}))}; }"""
+
+
+def expired_listed(rid):
+    """M1 (D-33: the grants page gives the expired window's history and the re-request path): the requester's grants
+    page lists end-exp's window under Ended (data-batch-control-list="ended") as "Expired", with a "Request again"
+    button that opens core's dialog prefilled from the ended window: its item (the name it followed, which the
+    requester may read), Configure ticked and nothing else, the "Prefilled from ended grant <id>" note, an empty
+    reason; submitted with a reason it files a new PENDING CONFIGURE request for the same item (swept in cleanup)."""
+    item = ENDED["exp"][1]
+    page_no = next((n for n in range(1, 21) if rid in api("requester", f"/batch-control/grants/?endedPage={n}").text), None)
+    s = Session("requester")
+    s.go("/batch-control/grants/" + (f"?endedPage={page_no}" if page_no else ""))
+    rows = s.page.locator(f"table[data-batch-control-list='ended'] > tbody > tr:has([data-batch-control-id='{rid}'])")
+    found = rows.count()
+    other = s.page.locator(f"table[data-batch-control-list]:not([data-batch-control-list='ended']) [data-batch-control-id='{rid}']").count()
+    row = rows.first.evaluate(ENDED_ROW_JS) if found else {}
+    cells = row.get("cells") or []
+    if found:
+        s.shot(f"table[data-batch-control-list='ended'] > tbody > tr:has([data-batch-control-id='{rid}'])",
+               "R27-D1-W-M1-1-ended-row-expired")
+    check("W", "M1 (D-33): the requester's grants page lists the expired window once, under Ended, its How cell "
+          "'Expired', its Scope the item it followed, with one 'Request again' dialog opener for this window",
+          page_no is not None and found == 1 and other == 0 and len(cells) >= 8 and cells[6] == "Expired"
+          and item in cells[2] and [a.get("url", "").rsplit("/", 1)[-1] for a in row.get("again") or []] == [f"dialog?from={rid}"]
+          and all(a.get("type") == "dialog-opener" for a in row.get("again") or []),
+          page=page_no, rows=found, elsewhere=other, cells=cells, again=row.get("again"))
+    if not found or not row.get("again"):
+        s.done()
+        return
+    rows.first.get_by_role("button", name="Request again").click()
+    dialog = s.page.locator("dialog[open]")
+    form = dialog.locator("form[name=createGrantRequest]")
+    try:
+        form.locator("input[name=scopeFullName]").wait_for(state="visible", timeout=10000)
+    except Exception:  # noqa: judged below (no dialog / no form)
+        pass
+    got = {"dialog": dialog.count(), "form": form.count()}
+    if form.count():
+        got.update(scope=form.locator("input[name=scopeFullName]").input_value(),
+                   actions={v: form.locator(f"input[name=actions][value={v}]").is_checked() for v in ("CREATE", "CONFIGURE", "DELETE")},
+                   note=norm(" ".join(t for t in form.locator("p.jenkins-description").all_inner_texts() if "Prefilled" in t)),
+                   reason=form.locator("textarea[name=reason]").input_value())
+        s.shot("dialog[open]", "R27-D1-W-M1-2-request-again-dialog")
+    check("W", "M1 (D-33): 'Request again' opens core's dialog with the grant form prefilled from the ended window: the "
+          "item it followed, Configure ticked (Create and Delete not), the note 'Prefilled from ended grant <id> for "
+          "<item>', and an empty reason", got.get("dialog") == 1 and got.get("form") == 1 and got.get("scope") == item
+          and got.get("actions") == {"CREATE": False, "CONFIGURE": True, "DELETE": False}
+          and f"Prefilled from ended grant {rid} for {item}" in (got.get("note") or "") and got.get("reason") == "", **got)
+    if got.get("form") != 1:
+        s.done()
+        return
+    form.locator("textarea[name=reason]").fill("e2e-27 D1 M1 again after expiry")
+    box = form.locator("input[name=approvers][value='approver-1']")
+    if not box.is_checked():
+        box.locator("xpath=following-sibling::label").first.click()
+    form.get_by_role("button", name="Request Grant").click()
+    landed = None
+    try:
+        s.page.wait_for_url(re.compile(r"/batch-control/grants/" + lib.UUID + "/$"), timeout=15000)
+        landed = s.page.url
+    except Exception:  # noqa: judged below
+        pass
+    new_id = (re.search(lib.UUID, landed or "") or [None])[0] if landed else None
+    stored = lib.stored("grant", new_id) if new_id else {}
+    scope = lib.facts("""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/requests/grant/""" + (new_id or "none")
+                      + """.xml'); if (!f.exists()) return '{}'; def x = new XmlSlurper().parse(f)
+return groovy.json.JsonOutput.toJson([scope: x.scope.fullName.text(), actions: x.actions.children()*.text()])""")
+    s.done()
+    check("W", "M1 (D-33): the prefilled dialog, submitted with a reason, files a new PENDING request for the same item "
+          "and Configure and lands on its page", new_id is not None and new_id != rid and stored.get("status") == "PENDING"
+          and stored.get("requester") == "requester" and scope.get("scope") == item and scope.get("actions") == ["CONFIGURE"],
+          landed=(landed or "").replace(lib.BASE, ""), stored=stored, scope=scope)
+
+
 def sec_W():
     ids = {k: S["grant_end_" + k][1] for k in ENDED}
     late = {k: S["grant_late_" + k][1] for k in LATE}
@@ -862,6 +988,7 @@ def sec_W():
             "delete": api("admin", lib.jpath(ENDED["del"][1]) + "/doDelete", "POST").status_code,
             "revoke_late": api("admin", f"/batch-control/grants/{late['rr']}/revoke", "POST").status_code}
     lib.wait_until(lambda: not window_of(ids["exp"]).get("open") and not window_of(late["er"]).get("open"), timeout=150, step=5)
+    expired_refuses(ids["exp"])
     windows = {k: window_of(v) for k, v in ids.items()}
     people = ("requester", "approver-1", "manager", "admin", "approver-disc")
     read = {k: may_read(ENDED[k][1], people) for k in ENDED}
@@ -876,6 +1003,7 @@ def sec_W():
           and read["rev"] == read["exp"] == readers and not any(read["del"].values()) and not exists(ENDED["del"][1]),
           opened={k: S["ended_" + k] for k in ENDED}, codes=done, windows=windows, read=read,
           removed_first=S.get("ended_removed"))
+    expired_listed(ids["exp"])
     reader = lambda name: "Freestyle project " + name  # noqa: E731
     leaf = lambda full: full.rsplit("/", 1)[1][:-len(TAIL)]  # noqa: E731
     n = 0
