@@ -384,6 +384,45 @@ def _monitor_def04(listed=True, **visit):
             "r31": {"listed": listed}, "layout_global": dict(lay, **visit), "layout_bc": dict(lay, **visit, before_install=False)}
 
 
+# #31 (r6/s5c.py): reject_color.py D rows as main renders them. Light theme colours: the destructive red (the probe),
+# the text colour, the primary (accent) colour of a non-destructive dialog's OK button.
+# Values as Chromium reported them on main (2026-11-02): computed colours in oklch, canvas-normalised "r,g,b,a"; core
+# paints the button background on ::before.
+RED, TEXT, ACCENT = "oklch(0.6 0.2671 30)", "oklch(0.05 0.075 256.91)", "oklch(0.55 0.2 260)"
+WHITE, NONE, ITEM = "rgb(255, 255, 255)", "rgba(0, 0, 0, 0)", "oklch(0.97 0.005 256.91)"
+NORM = {RED: "248,0,0,255", TEXT: "0,8,35,255", ACCENT: "0,92,230,255", WHITE: "255,255,255,255", NONE: "0,0,0,0",
+        ITEM: "243,245,248,255"}
+
+
+def _btn(label, color, before, classes):
+    return {"label": label, "color": color, "bg": NONE, "before_bg": before, "classes": classes, "visible": True,
+            "n": {"color": NORM[color], "bg": NORM[NONE], "before_bg": NORM[before]}}
+
+
+def _destructive(where, control, **change):
+    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke"}[control]
+    r = {"where": where, "control": control, "user": "admin" if control == "Revoke" else "requester", "page": "/batch-control/x/",
+         "http": 200, "probe": RED, "around": TEXT, "count": 1,
+         "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
+                    "classes": "jenkins-button jenkins-!-destructive-color confirmation-link"},
+         "dialog": {"probe": RED, "probe_n": NORM[RED], "title": "Cancel this run request?", "text": "...",
+                    "buttons": ["Cancel", ok_text],
+                    "ok": _btn(ok_text, WHITE, RED, "jenkins-button jenkins-button--primary jenkins-!-destructive-color"),
+                    "cancel": _btn("Cancel", TEXT, ITEM, "jenkins-button")},
+         "closed_on_cancel": True, "url_after_cancel": "/batch-control/x/", "state_before": True, "state_after": True}
+    for k, v in change.items():
+        if isinstance(v, dict) and isinstance(r.get(k), dict):
+            r[k] = dict(r[k], **v)
+        else:
+            r[k] = v
+    return r
+
+
+def _destructive_rows(drop=None, **changes):
+    """All five D rows; `changes` maps a row's where (spaces as _) to its changes."""
+    return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -650,6 +689,35 @@ def synthetic():
          crawl_ctx("requester"), "pass", None),
         ("allowed: Workspace 404 for admin, classic (C-04)", "crawl", [link(WS_PAGE, "/job/ops/job/job-a/ws/", 404, ui="classic", label="Workspace")],
          crawl_ctx(ui="classic"), "pass", None),
+        # #31 (r6/s5c.py): Cancel Request and Revoke are red and open red confirmation dialogs (reject_color.py D)
+        ("destructive: #31 every control red, every dialog's OK red, Cancel changes nothing", "destructive", _destructive_rows(),
+         {}, "pass", None),
+        ("destructive: #31 Cancel Request without the destructive class (text colour)", "destructive",
+         _destructive_rows(run_request={"button": {"color": TEXT, "classes": "jenkins-button confirmation-link"}}), {}, "fail",
+         "destructive-button"),
+        ("destructive: #31 the window page shows no Revoke", "destructive", _destructive_rows(window={"button": None, "count": 0,
+                                                                                                    "dialog": None}),
+         {}, "fail", "destructive-button"),
+        ("destructive: #31 Revoke's dialog not destructive (OK in the accent colour)", "destructive",
+         _destructive_rows(grants_list={"dialog": {"ok": _btn("Revoke", WHITE, ACCENT, "jenkins-button jenkins-button--primary")}}),
+         {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the OK button's red only matches after normalisation (rgb vs oklch)", "destructive",
+         _destructive_rows(window={"dialog": {"ok": dict(_btn("Revoke", WHITE, RED, "jenkins-button jenkins-button--primary"),
+                                                         before_bg="rgb(248, 0, 0)")}}), {}, "pass", None),
+        ("destructive: #31 the click opens no dialog", "destructive", _destructive_rows(activation_request={"dialog": None}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 the dialog's Cancel is red too", "destructive",
+         _destructive_rows(permission_window_request={"dialog": {"cancel": _btn("Cancel", RED, ITEM, "jenkins-button")}}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 Cancel in the dialog cancelled the request", "destructive",
+         _destructive_rows(run_request={"state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the window never conferred (no premise for 'nothing changed')", "destructive",
+         _destructive_rows(window={"state_before": False, "state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the probe does not resolve (same colour as the text)", "destructive",
+         _destructive_rows(run_request={"probe": TEXT, "button": {"color": TEXT}}), {}, "fail", "destructive-measured"),
+        ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
+         "destructive-measured"),
+        ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],

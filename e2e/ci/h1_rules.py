@@ -1101,6 +1101,73 @@ def _permalinks_entries(c):
 
 
 # ------------------------------------------------------------------ entry point for the drivers
+# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py)
+# The destructive controls section D measures: (where, control). Each must have a row (destructive-measured).
+DESTRUCTIVE_CONTROLS = (("run request", "Cancel Request"), ("permission window request", "Cancel Request"),
+                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"))
+
+
+def _painted(button, probe, probe_n):
+    """Whether a dialog button shows the probe's colour as its text, background or ::before background (core paints a
+    button's background on ::before). Raw computed values are compared, and the canvas-normalised "r,g,b,a" of each
+    (reject_color.py "n") with the probe's, so oklch(...) and rgb(...) of one colour match."""
+    if not probe:
+        return False
+    keys = ("color", "bg", "before_bg")
+    n = button.get("n") or {}
+    return probe in [button.get(k) for k in keys] or (bool(probe_n) and probe_n in [n.get(k) for k in keys])
+
+
+def judge_destructive(rows, ctx=None):
+    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"): Cancel Request on the three
+    request pages and Revoke on the grants list and on the window's page render in the theme's destructive colour and
+    open core's destructive confirmation dialog. Colours are compared with a probe styled color: var(--destructive-color)
+    on the same page (reject_color.py D):
+      * destructive-measured: every DESTRUCTIVE_CONTROLS entry has a row, and its probe resolves to a colour of its own
+        (it differs from the text around the control; an undefined variable would make every comparison vacuous);
+      * destructive-button: the control ("button": a.confirmation-link styled as a button) is on the page, shown, and
+        its computed colour is the probe's;
+      * destructive-dialog: a click opens a dialog whose OK button is red (its computed colour, background or ::before
+        background is the dialog's probe: core's .jenkins-button--primary[class*=color]) and whose Cancel button is
+        not; Cancel closes it and nothing changed on the server (the request still pending, the window still
+        conferring Configure)."""
+    j = Judge("destructive", ctx)
+    seen = {(r.get("where"), r.get("control")) for r in rows}
+    for where, control in DESTRUCTIVE_CONTROLS:
+        if (where, control) not in seen:
+            j.fail("destructive-measured", {"where": where, "control": control, "row": "missing"})
+    for r in rows:
+        key = {"where": r.get("where"), "control": r.get("control")}
+        probe = r.get("probe")
+        if not probe or probe == r.get("around"):
+            j.fail("destructive-measured", dict(key, probe=probe, around=r.get("around")))
+        ctl = r.get("button")
+        if not ctl or not ctl.get("visible") or r.get("http") != 200:
+            j.fail("destructive-button", dict(key, problem="no shown control", http=r.get("http"), count=r.get("count")))
+        elif ctl.get("color") != probe:
+            j.fail("destructive-button", dict(key, color=ctl.get("color"), probe=probe), {"classes": ctl.get("classes")})
+        d = r.get("dialog")
+        if not ctl:
+            continue
+        if not d:
+            j.fail("destructive-dialog", dict(key, problem="the click opened no dialog"))
+            continue
+        ok, cancel, dprobe = d.get("ok") or {}, d.get("cancel") or {}, d.get("probe")
+        problems = []
+        if not ok.get("visible") or not _painted(ok, dprobe, d.get("probe_n")):
+            problems.append("OK not in the destructive colour")
+        if not cancel.get("visible") or _painted(cancel, dprobe, d.get("probe_n")):
+            problems.append("no Cancel, or Cancel in the destructive colour")
+        if r.get("closed_on_cancel") is not True:
+            problems.append("Cancel did not close the dialog")
+        if r.get("state_before") is not True or r.get("state_after") is not True:
+            problems.append("the request is no longer pending or the window no longer confers (or never did)")
+        if problems:
+            j.fail("destructive-dialog", dict(key, problems=problems),
+                   {"ok": ok, "cancel": cancel, "probe": dprobe, "state": [r.get("state_before"), r.get("state_after")]})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1113,6 +1180,8 @@ def judge(driver, rows, ctx=None):
         return judge_misc(rows, ctx)
     if driver in ("errpages", "listpager", "incident", "help", "help2", "monitor"):
         return judge_targeted(driver, rows, ctx)
+    if driver == "destructive":
+        return judge_destructive(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

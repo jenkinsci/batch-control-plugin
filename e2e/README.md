@@ -107,7 +107,8 @@ class and source). Warnings are never judged. An allowlist entry that applied an
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
 counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
 made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
-references (`design-ref`, `design-ref-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+references (`design-ref`, `design-ref-measured`) and `r21/reject_color.py` D (`destructive`), next to #129's
+`helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -708,8 +709,20 @@ page in its own context, and the browser's computed styles are compared: the Rej
 a probe inserted next to it with `style="color: var(--destructive-color)"` (the theme's red, not a hard-coded RGB). The
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
 button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
-the three requests. Light theme only. Alone:
-`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of it the shared setup).
+the three requests. Light theme only.
+
+Section `D` (#31, the check of the retired `r6/s5c.py`; the CI step runs `reject_color.py RGAD`): the requester opens
+the three pending requests and measures "Cancel Request"; admin opens the grants list and the detail page of a window
+the requester holds (CONFIGURE on `r21-reject`, approved over REST for D and revoked in the clean-up) and measures
+"Revoke". Each control (core's `l:confirmationLink`, found by its `data-url`) is compared with the same probe, then
+clicked: core's confirmation dialog must open, its OK button must be red (its computed colour, background or `::before`
+background, where core paints a button's background, equal to a probe inside the dialog, also compared after a canvas
+normalisation so `oklch(...)` and `rgb(...)` match: core's destructive dialog type) and its Cancel button not, and Cancel
+must close it and change nothing (the request still pending, the window still conferring Configure). The rows are judged by `ci/h1_rules.py`
+(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the five
+controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
+`-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
+it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 

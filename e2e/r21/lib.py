@@ -23,6 +23,11 @@ L16.SHOTS.mkdir(parents=True, exist_ok=True)
 L16.OUT.mkdir(parents=True, exist_ok=True)
 SHOTS, OUT = L16.SHOTS, L16.OUT
 
+# #31: the destructive-control checks (reject_color.py D) are judged by ci/h1_rules.py, as r14/lib.py loads it
+_h1spec = importlib.util.spec_from_file_location("h1_rules", HERE.parent / "ci" / "h1_rules.py")
+h1 = importlib.util.module_from_spec(_h1spec)
+_h1spec.loader.exec_module(h1)
+
 Session, api, groovy, gv, BASE, ENV = L16.Session, L16.api, L16.groovy, L16.gv, L16.BASE, L16.ENV
 check, note, run_sections, console_ok, J = L16.check, L16.note, L16.run_sections, L16.console_ok, L16.J
 grant_req, loc_id, decide, LOGNAME = L16.grant_req, L16.loc_id, L16.decide, L16.LOGNAME
