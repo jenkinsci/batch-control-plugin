@@ -61,6 +61,12 @@ Content checks (CI, 2026-10-05), on every page reached with status < 400, all ro
     result INFO, once per URL pattern and text, so the summary can say how many were checked. Since Wave D D3 (#6) the
     run and incident tables have no Result column: there the Run cell is read (its text after "#n" is the label; a raw
     word anywhere in the cell is a raw-result, a badge in it a result-badge).
+Design references (#31, the check of the retired r6/s6.py), judged by ci/h1_rules.py, not here: CONTENT_JS also scans
+the whole body (shown or hidden text, <template> contents, the title/tooltip/aria-label/placeholder attributes; never
+pre/code/textarea) for an internal design reference ("SPEC item", "SPEC section", "D-<nn>", "DECISIONS.md",
+"TEST-MATRIX") and the page row (and an Advanced row) carries the scan as "design" ({texts, skipped, refs}): a ref is a
+"FAIL crawl design-ref", a page below 400 without a scan (or with no text scanned) a "FAIL crawl design-ref-measured".
+Text an e2e driver typed (it contains "e2e-<digit>", e.g. a reason "e2e-17 D-75 ...") is user data and only counted.
 Advanced (D1 follow-up, owner decision 2026-10-14): on every page reached, core's Advanced controls of the main panel
 are pressed after the page has been checked as loaded, and the content checks run again, so what sits behind Advanced
 (the administrator's revert entry and its sentence on the Batch Control configuration page) is checked too; the controls
@@ -199,6 +205,29 @@ CONTENT_JS = r"""
     if ((m = ENT.exec(t))) out.entities.push({match: m[0], text: t.slice(0, 160), el: desc(el)});
     if (/<script/i.test(t)) out.script_text.push({text: t.slice(0, 160), el: desc(el)});
   }
+  // #31 (r6/s6.py): no internal design reference ("SPEC item 8", "D-61", "DECISIONS.md", "TEST-MATRIX") on a page a user
+  // sees. Unlike the checks above it reads the whole body, shown or not (a dialog or an Advanced block opens later), and
+  // the text of <template> elements and of the attributes a browser shows (title, tooltip, aria-label, placeholder);
+  // never pre/code/textarea (user data: diffs, logs, parameter values). Text an e2e driver typed ("e2e-17 D-75 ...")
+  // is user data: counted as skipped, not judged. ci/h1_rules.py judges the result (design-ref, design-ref-measured).
+  const DESIGN = /\bSPEC (?:item|section)\b|\bD-\d{2,3}[a-z]?\b|\bDECISIONS\.md\b|\bTEST-MATRIX\b/;
+  const TYPED = /\be2e-\d/;
+  const design = {texts: 0, skipped: 0, refs: []};
+  const designText = (t, where) => { const v = (t || '').replace(/\s+/g, ' ').trim(); if (!v) return; design.texts++;
+    const m = DESIGN.exec(v); if (!m) return; if (TYPED.test(v)) { design.skipped++; return; }
+    if (design.refs.length < 20) design.refs.push({match: m[0], text: v.slice(0, 160), el: where}); };
+  const designWalk = root => { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n => {
+      const p = n.parentElement;
+      return p && p.closest('pre, code, textarea, script, style, noscript') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }});
+    for (let n = w.nextNode(); n; n = w.nextNode()) designText(n.nodeValue, n.parentElement ? desc(n.parentElement) : 'template'); };
+  if (document.body) {
+    designWalk(document.body);
+    document.body.querySelectorAll('template').forEach(t => designWalk(t.content));
+    document.body.querySelectorAll('[title], [tooltip], [aria-label], [placeholder]').forEach(e => {
+      if (e.closest('pre, code, textarea')) return;
+      for (const a of ['title', 'tooltip', 'aria-label', 'placeholder']) if (e.hasAttribute(a)) designText(e.getAttribute(a), desc(e) + '@' + a); });
+  }
+  out.design = design;
   const full = texts.map(x => x[0]).join(' ');
   for (let i = full.indexOf('bc-markup-probe'); i >= 0; i = full.indexOf('bc-markup-probe', i + 1)) out.probe.push(full.slice(i, i + 80));
   out.canary = !!window.__bcCanary;
@@ -239,14 +268,16 @@ _content_seen = set()
 
 
 def content_checks(s, path, pt):
-    """The content checks of the docstring; one FAIL line per (check, pattern, finding), every finding logged."""
+    """The content checks of the docstring; one FAIL line per (check, pattern, finding), every finding logged. Returns
+    the page's design-reference scan ({"texts", "skipped", "refs"}, #31), which the caller puts on the page (or
+    advanced) row for ci/h1_rules.py; None when CONTENT_JS failed (the rules then report the measurement missing)."""
     try:
         c = s.page.evaluate(CONTENT_JS)
     except Exception as e:  # noqa
         c = None
         emit({"page": path, "pattern": pt, "kind": "content", "check": "content-js", "result": "ERROR", "detail": str(e)[:200]})
     if not c:
-        return
+        return None
     found = []
     if "/batch-control" in path:
         for x in c["empty_cells"]:
@@ -285,6 +316,7 @@ def content_checks(s, path, pt):
         if sig not in _content_seen:
             _content_seen.add(sig)
             print("FAIL content " + json.dumps({"role": ROLE, "ui": UI, "check": check, "page": path, "key": key, "detail": detail})[:600], flush=True)
+    return c.get("design")
 
 
 def check_url(s, url, cache):
@@ -527,16 +559,21 @@ def main():
             if dropped:
                 cons.remove(dropped)
         h1 = s.page.locator("h1").first.inner_text().strip()[:80] if s.page.locator("h1").count() else ""
-        emit({"page": path, "kind": "page", "start": path in START, "status": status, "final": s.page.url.replace(BASE, ""),
-              "h1": h1, "console": cons[:10], "bad_subrequests": bad[:5], "own_status_line_dropped": bool(dropped)})
+        row = {"page": path, "kind": "page", "start": path in START, "status": status, "final": s.page.url.replace(BASE, ""),
+               "h1": h1, "console": cons[:10], "bad_subrequests": bad[:5], "own_status_line_dropped": bool(dropped)}
         if status and status >= 400:
+            emit(row)
             continue
-        content_checks(s, path, pt)
+        # #31: the page row carries the design-reference scan of its content checks (judged in ci/h1_rules.py, required
+        # on every page below 400), so the content rows of the page are logged just before it
+        row["design"] = content_checks(s, path, pt)
+        emit(row)
         adv = expand_advanced(s)
         if adv:  # D1 follow-up: what sits behind Advanced is checked too
+            revealed = re.sub(r"\s+", " ", s.page.locator("#main-panel").inner_text())[-300:]
+            design = content_checks(s, path, pt)
             emit({"page": path, "pattern": pt, "kind": "advanced", "result": "expanded", "pressed": adv,
-                  "revealed": re.sub(r"\s+", " ", s.page.locator("#main-panel").inner_text())[-300:]})
-            content_checks(s, path, pt)
+                  "revealed": revealed, "design": design})
         els = s.page.evaluate(ELEMENTS_JS)
         is_bc = "/batch-control" in path
         occ = {}

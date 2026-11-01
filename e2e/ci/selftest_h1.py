@@ -200,6 +200,10 @@ def upgrade(unit):
                 if h.get("expands") == "no-help-area":
                     h["expands"] = True  # T-01: helpcheck2 shows each of these clicks adds one visible help block
         out.append(r)
+    if d == "crawl":
+        SKIPPED.append(("crawl design references", "#31 (r6/s6.py): the recorded crawl rows carry no design-reference scan "
+                                                   "(crawl.py records it since #31), so the replay waives the required "
+                                                   "scan (ctx pre31_design_ref); the synthetic cases cover it"))
     if d == "help":
         SKIPPED.append(("help layout", "#31 E2E-D4: the recorded help rows carry no layout (helpcheck.py measures it since "
                                        "#31), so the replay waives the required layout (ctx pre31_layout); the synthetic "
@@ -228,6 +232,8 @@ def replay(units):
         ctx = u["ctx"]
         if u["driver"] == "help":  # #31: the recorded help rows predate the E2E-D4 layout; it cannot be replayed
             ctx = dict(ctx or {}, pre31_layout=True)
+        if u["driver"] == "crawl":  # #31: the recorded crawl rows predate the design-reference scan
+            ctx = dict(ctx or {}, pre31_design_ref=True)
         lines = h1.judge(u["driver"], rows, ctx).lines()
         for line in lines:
             if line.startswith("FAIL "):
@@ -247,8 +253,15 @@ def crawl_ctx(role="admin", ui="new", profile="matrix"):
     return {"role": role, "ui": ui, "ids": IDS, "prefix": PREFIX, "profile": profile}
 
 
-def page(path, status=200, role="admin", ui="new", console=()):
-    return {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+# #31: the design-reference scan r14/crawl.py puts on every page row below 400 (a clean page as main renders it)
+DESIGN_OK = {"texts": 120, "skipped": 0, "refs": []}
+
+
+def page(path, status=200, role="admin", ui="new", console=(), design="clean"):
+    r = {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+    if status < 400 and design is not None:
+        r["design"] = dict(DESIGN_OK) if design == "clean" else design
+    return r
 
 
 def link(p, target, status, role="admin", ui="new", label="x", data=None):
@@ -637,6 +650,26 @@ def synthetic():
          crawl_ctx("requester"), "pass", None),
         ("allowed: Workspace 404 for admin, classic (C-04)", "crawl", [link(WS_PAGE, "/job/ops/job/job-a/ws/", 404, ui="classic", label="Workspace")],
          crawl_ctx(ui="classic"), "pass", None),
+        # #31 (r6/s6.py): internal design references on a page a user sees
+        ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
+         [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 'SPEC item' in a tooltip behind Advanced", "crawl",
+         [{"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded",
+           "design": {"texts": 90, "skipped": 0, "refs": [{"match": "SPEC item", "text": "see SPEC item 2", "el": "a@title"}]}}],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 driver-typed text with a D-number is skipped, nothing else found", "crawl",
+         [page(req, design={"texts": 80, "skipped": 1, "refs": []})], crawl_ctx(), "pass", None),
+        ("crawl: #31 a page below 400 without the scan (the driver stopped measuring)", "crawl",
+         [page(req, design=None)], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a scan that read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": []})], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 an Advanced row without the scan", "crawl",
+         [page("/manage/batch-control-configuration/"),
+          {"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded"}],
+         crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a 403 page is not scanned and needs no scan", "crawl",
+         [page("/batch-control/dashboard/", 403, role="requester", design=None)], crawl_ctx("requester"), "pass", None),
         ("allowed: the header.js page error by its stack (U-1)", "crawl", [page(req, console=[U1_ENTRY])], crawl_ctx(), "pass", None),
         ("allowed: D-70 by its exact message", "crawl", [page("/job/batch-daily/", console=[D70_LINE])], crawl_ctx(), "pass", None),
         ("allowed: warnings are never judged", "crawl", [page(req, console=["warning: .behavior-loading is deprecated"])], crawl_ctx(), "pass", None),

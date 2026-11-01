@@ -105,7 +105,9 @@ regex, exact status or whole normalised message, a page error's leading stack fr
 class and source). Warnings are never judged. An allowlist entry that applied and matched nothing prints
 `STALE allow <id>`, a warning that `summary.md` lists. `python3 e2e/ci/selftest_h1.py` replays recorded rows and
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
-counts the notable rows of crawl, actions and jobui.
+counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
+made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
+references (`design-ref`, `design-ref-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -280,6 +282,15 @@ filesystem path in the visible text (`/var/`, `/tmp/`, `/home/`, `jenkins_home`,
 `FOLDER_ONLY:`). Text in `pre`, `code` and `textarea` is not checked. Empty cells in optional columns (Decided,
 Aborted by, Comment, Parameters, ...) are logged once per pattern as `empty-optional` rows without a verdict.
 
+Design references (#31, the check of the retired `r6/s6.py`): the same `CONTENT_JS` scans the whole body of each page
+(shown or hidden text, `<template>` contents and the `title`, `tooltip`, `aria-label` and `placeholder` attributes; never
+`pre`, `code` or `textarea`) for an internal design reference: `SPEC item`, `SPEC section`, `D-<nn>`, `DECISIONS.md`,
+`TEST-MATRIX`. The page row (and the row of an Advanced expansion) carries the scan as `design` (`texts`, `skipped`,
+`refs`), and `ci/h1_rules.py` judges it: each reference is a `FAIL crawl design-ref`, and a page below 400 without the
+scan or with no text scanned a `FAIL crawl design-ref-measured` (the measurement is required). Text an e2e driver typed
+(it contains `e2e-<digit>`, as the reason `e2e-17 D-75 (1): ...` of `r17/s39.py`) is user data: counted as `skipped`,
+not judged.
+
 Raw enum values (e2e-16): an UPPER_SNAKE_CASE constant (`GRANT_REVOKE`, `APPROVED_REQUEST`, ...), the scope prefix
 `ITEM:` and the state and action words of the plugin's vocabulary (`PENDING`, `APPROVED`, ..., `CONFIGURE`, `CREATE`,
 `DELETE`) shown as text are logged once per URL pattern and value as `raw-enum` rows with result INFO, without a
@@ -292,8 +303,11 @@ look-alikes that must stay silent (a path in `<pre>`, a URL path, empty optional
 probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings and raw-enum
 rows (2026-10-06: 9 defect findings and the raw-enum values `FOLDER_ONLY`, `GRANT_REVOKE`, `ITEM:`, `PENDING` on the
 first page; no defect and only `JOB_NAME` on the second, where `GRANT_REVOKE` and `ITEM:` inside `<code>` and title-case
-words must stay silent; the same on 2026-10-06 for e2e-17). Run it after editing the checks; `.github/workflows/e2e.yml`
-runs it in the `coverage` job (22ed006).
+words must stay silent; the same on 2026-10-06 for e2e-17). Since #31 it also compares the design-reference scan that
+`content_checks()` returns: `D-61`, `SPEC item` (a `title`), `D-59a` (hidden text) and `DECISIONS.md` (a `<template>`)
+on the first page; none on the second, where `D-61` in `<code>`, `SPEC item` in `<pre>`, `D-59` in a `<textarea>`,
+`ID-12`, `D-1`, lower case and a driver-typed reason (`e2e-17 D-75 ...`, one skipped text) must stay silent. Run it after
+editing the checks; `.github/workflows/e2e.yml` runs it in the `coverage` job (22ed006).
 
 ### Fixture preconditions
 

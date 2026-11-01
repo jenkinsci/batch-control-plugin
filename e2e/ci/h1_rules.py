@@ -418,6 +418,20 @@ def transient_widget_entry(r, res, target):
             and bool(TRANSIENT_TARGET.fullmatch(target or "")))
 
 
+def design_refs(j, r, base, ctx):
+    """#31 (the retired r6/s6.py): no internal design reference ("SPEC item", "D-61", ...) on a page a user sees.
+    r14/crawl.py's CONTENT_JS scans every page below 400 (and again behind Advanced) and puts the scan on the row as
+    "design" = {texts, skipped, refs}. Each ref FAILS design-ref; a row without the scan, or one that scanned no text,
+    FAILS design-ref-measured (the measurement is required). Only selftest_h1.py's replay of rows recorded before #31
+    passes ctx pre31_design_ref."""
+    d = r.get("design")
+    if not (ctx or {}).get("pre31_design_ref") and (not isinstance(d, dict) or not d.get("texts")):
+        j.fail("design-ref-measured", dict(base, kind=r.get("kind"), design="missing" if d is None else "no text scanned"))
+    refs = (d.get("refs") or []) if isinstance(d, dict) else []
+    for x in refs:
+        j.fail("design-ref", dict(base, match=x.get("match")), x)
+
+
 def judge_crawl(rows, ctx):
     j = Judge("crawl", ctx)
     ids, prefix, profile = ctx.get("ids") or {}, ctx.get("prefix", ""), ctx.get("profile", "matrix")
@@ -434,6 +448,10 @@ def judge_crawl(rows, ctx):
             if r.get("status") != want:
                 j.fail("page-status", dict(base, status=r.get("status"), expected=want, rule=rid))
             j.console("page-console", r.get("console"), base)
+            if (r.get("status") or 0) < 400:  # #31: the crawl scans every page it does not leave at its 4xx status
+                design_refs(j, r, base, ctx)
+        elif kind == "advanced":
+            design_refs(j, r, base, ctx)
         elif kind in ("link", "post-form"):
             target = page_key(r.get("target") or "", ids, prefix)
             if res == "BROKEN":
