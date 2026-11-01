@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Run control as its users meet it (SPEC 6, 6a and the section 6 usability line). Matrix rows
  * T-06-66 (e2e-03 DEF-14, note 128), T-06-67 (DEF-15, note 129), T-06-68 (DEF-16, note 130),
- * T-06-70 (DEF-25, note 131), T-06a-55 (DEF-21, note 132) and T-05-19 (DEF-12, note 133).
+ * T-06-70 (DEF-25, note 131), T-06-110 (e2e-04 FD-16, note 366), T-06a-55 (DEF-21, note 132) and T-05-19 (DEF-12, note 133).
  *
  * <p>Users: {@code admin}; {@code u1} requester (Read, Item/Read, Item/Build, Request,
  * ViewHistory); {@code nb} requester without Item/Build (Read, Item/Read, Request, ViewHistory);
@@ -283,6 +283,55 @@ public class RunControlUsabilityTest {
                 "a reader without BatchControl/Request must not be offered Request Run");
         assertFalse(UsabilityFixtures.hasLinkTo(j, readerJob, failing.getUrl() + "batch-control"),
                 "no link to the run request screen may be offered to a reader without BatchControl/Request");
+    }
+
+    /**
+     * T-06-110 (e2e-04 FD-16, LIMITATIONS 41 "the rebuild plugin's Rebuild can be hidden, and is",
+     * note 366): the job's run-request pages offer no "Rebuild Last" either. A parameterised
+     * approval-required job with one completed (approved) run; u1 opens its Request Run page
+     * ({@code job/<name>/batch-control/}) and submits the form with an empty reason, which is refused
+     * (no request created, the form shown again). Neither page carries an anchor captioned "Rebuild
+     * Last" nor an anchor to a {@code rebuild} URL (the defect's link was
+     * {@code lastCompletedBuild/rebuild/parameterized} in the side panel). Control: the rebuild plugin
+     * offers "Rebuild Last" on an uncontrolled parameterised job with a completed build.
+     */
+    @Test
+    public void t_06_110_noRebuildLastOnTheRefusedSubmitPage() throws Exception {
+        FreeStyleProject free = uncontrolled(j.createFreeStyleProject("rl-free"));
+        free.addProperty(new hudson.model.ParametersDefinitionProperty(new hudson.model.StringParameterDefinition("DATE", "2000-01-01")));
+        BatchControlFixtures.activateAsAdmin(free);
+        j.buildAndAssertSuccess(free);
+        HtmlPage freePage = UsabilityFixtures.htmlPage(j, "u1", free.getUrl());
+        assertFalse(UsabilityFixtures.anchorsCaptioned(freePage, Pattern.compile("Rebuild Last")).isEmpty(),
+                "control: the rebuild plugin offers Rebuild Last on an uncontrolled job with a completed build: "
+                        + UsabilityFixtures.resolvedHrefs(freePage));
+
+        FreeStyleProject job = approvalRequired("rl-x");
+        job.addProperty(new hudson.model.ParametersDefinitionProperty(new hudson.model.StringParameterDefinition("DATE", "2000-01-01")));
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        assertNotNull(job.getLastCompletedBuild(), "fixture: the approved run completed, so Rebuild Last would apply");
+
+        JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
+        org.htmlunit.html.HtmlForm form = TypedParameterFixtures.requestRunForm(j, wc, job);
+        assertNoRebuildLast((HtmlPage) form.getPage(), "the Request Run page");
+
+        java.util.Set<String> before = ApproverFormFixtures.runRequestIds();
+        Page answer = TypedParameterFixtures.submit(wc, form, "", "a1");
+        assertEquals(before, ApproverFormFixtures.runRequestIds(), "premise: the submission with an empty reason is refused");
+        assertTrue(answer instanceof HtmlPage, "premise: the refusal is a page, got " + answer.getWebResponse().getContentType());
+        HtmlPage refused = (HtmlPage) answer;
+        assertFalse(UsabilityFixtures.formsEndingWith(refused, job.getUrl() + "batch-control/submit").isEmpty(),
+                "premise: the refused-submit page shows the form again: " + excerpt(refused.asNormalizedText()));
+        assertNoRebuildLast(refused, "the refused-submit page");
+    }
+
+    private static void assertNoRebuildLast(HtmlPage page, String where) throws Exception {
+        assertTrue(UsabilityFixtures.anchorsCaptioned(page, Pattern.compile("Rebuild Last")).isEmpty(),
+                where + ": Rebuild Last must not be offered on an approval-required job: " + excerpt(page.asNormalizedText()));
+        for (String href : UsabilityFixtures.resolvedHrefs(page)) {
+            assertFalse(href.contains("/rebuild"), where + ": no rebuild link may be offered: " + href);
+        }
     }
 
     // ---------------------------------------------------------------- helpers

@@ -39,7 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * configuration under Manage Jenkins ({@code manage/batch-control-configuration/}): the page
  * offers Save and no Apply button (T-UI-27), and a refused save (HTTP 400) shows the
  * "Nothing was saved." alert with the typed values, in the same settings-subpage layout as the
- * page itself (T-UI-28). Note 186.
+ * page itself (T-UI-28). Note 186. The refusal banner shows an apostrophe once escaped (T-CFG-13,
+ * e2e-04 FD-14) and a refused number keeps the typed value with its message (T-CFG-14, e2e-04
+ * FD-15), note 366.
  *
  * <p>Same realm and strategy as {@link ConfigAuditTest} (Jenkins' own user database, so an unknown
  * approver id is really unknown): {@code manager} holds Overall/Read, Job/Read and
@@ -294,7 +296,135 @@ public class ConfigPagePolishTest {
         }
     }
 
+    /**
+     * T-CFG-13 (e2e-04 FD-14, note 366): the refusal banner of a refused save shows an apostrophe
+     * as {@code '}, not as the literal entity {@code &#039;} (no double escaping), and stays escaped
+     * against markup. The manager saves {@code manage/batch-control-configuration/} with the unknown
+     * approver ids {@code no-such-user} (the report's case), {@code o'brien-ghost} (an apostrophe in
+     * the input) and {@code <b>bold-ghost</b>} (markup in the input), one save each. Each answer is
+     * the 400 refusal; its "Nothing was saved." alert names the id between plain apostrophes
+     * ({@code 'no-such-user'}, as the fixed banner reads in e2e-04's verification), contains no
+     * {@code &#039;}, {@code &#39;}, {@code &amp;} or {@code &lt;} as visible text, and contains no
+     * {@code b} element. The administrator's save of {@code ghost-user} on {@code manage/configure}
+     * (core's error page) reads {@code 'ghost-user'} the same way. Nothing is stored.
+     */
+    @Test
+    public void t_cfg_13_refusalBannerShowsApostrophesOnceEscaped() throws Exception {
+        Map<String, String> inputs = new LinkedHashMap<>();
+        inputs.put("no-such-user", "'no-such-user'");
+        inputs.put("o'brien-ghost", "o'brien-ghost");
+        inputs.put("<b>bold-ghost</b>", "bold-ghost");
+        for (Map.Entry<String, String> input : inputs.entrySet()) {
+            String typed = input.getKey();
+            HtmlForm form = settingsForm(configPage("manager"));
+            setApprovers(form, typed);
+            Page answer = j.submit(form);
+            assertEquals(400, answer.getWebResponse().getStatusCode(), typed + ": premise: the save is refused");
+            assertEquals(Arrays.asList("a1"), BatchControlGlobalConfiguration.get().getApprovers(), typed + ": nothing may be saved");
+            HtmlPage refused = (HtmlPage) answer;
+            List<DomElement> banners = new ArrayList<>();
+            for (Object o : refused.getByXPath("//*[contains(concat(' ', normalize-space(@class), ' '), ' jenkins-alert ')"
+                    + " or @role='alert']")) {
+                DomElement e = (DomElement) o;
+                if (e.asNormalizedText().contains(NOTHING_SAVED)) {
+                    banners.add(e);
+                }
+            }
+            assertFalse(banners.isEmpty(), typed + ": premise: the \"" + NOTHING_SAVED + "\" banner is shown: "
+                    + UsabilityFixtures.excerpt(refused.asNormalizedText()));
+            for (DomElement banner : banners) {
+                String text = banner.asNormalizedText();
+                assertTrue(text.contains(input.getValue()), typed + ": the banner must show " + input.getValue()
+                        + " with plain apostrophes, read: " + text);
+                for (String entity : new String[] {"&#039;", "&#39;", "&apos;", "&amp;", "&lt;", "&gt;", "&quot;"}) {
+                    assertFalse(text.contains(entity), typed + ": the banner must not show the entity " + entity
+                            + " (escaped twice), read: " + text);
+                }
+                assertTrue(banner.getElementsByTagName("b").isEmpty(), typed + ": markup in the input must not render as"
+                        + " an element in the banner: " + banner.asXml());
+            }
+        }
+
+        HtmlPage system = (HtmlPage) get("admin", "manage/configure", true);
+        HtmlForm systemForm = null;
+        for (HtmlForm f : system.getForms()) {
+            if (!f.querySelectorAll("[name='_.pendingTimeoutHours']").isEmpty()) {
+                systemForm = f;
+            }
+        }
+        assertNotNull(systemForm, "premise: manage/configure carries the Batch Control settings");
+        setApprovers(systemForm, "ghost-user");
+        Page systemAnswer = j.submit(systemForm);
+        assertTrue(systemAnswer.getWebResponse().getStatusCode() >= 400, "premise: the System page save is refused, got HTTP "
+                + systemAnswer.getWebResponse().getStatusCode());
+        String systemText = UsabilityFixtures.text(systemAnswer);
+        assertTrue(systemText.contains("'ghost-user'"), "the System page refusal must read 'ghost-user' with plain apostrophes: "
+                + UsabilityFixtures.excerpt(systemText));
+        assertFalse(systemText.contains("&#039;") || systemText.contains("&#39;"), "the System page refusal must not show"
+                + " &#039;: " + UsabilityFixtures.excerpt(systemText));
+        assertEquals(Arrays.asList("a1"), BatchControlGlobalConfiguration.get().getApprovers(), "nothing may be saved");
+    }
+
+    /**
+     * T-CFG-14 (e2e-04 FD-15, D-53 "the form keeps the input", note 366): the manager saves Retention
+     * period {@code 0}, Pending request timeout {@code 0} and Maximum grant duration {@code 123}. The
+     * answer is the 400 refusal; the form comes back with {@code 0} in the retention field and in the
+     * pending timeout field (not the stored values), with the message {@code '0' is not allowed}
+     * (e2e-04's verified wording "'0' is not allowed; enter a whole number of 1 or more.") inside each
+     * refused field's form item, and with {@code 123} kept in the maximum grant duration field. Nothing
+     * is stored.
+     */
+    @Test
+    public void t_cfg_14_refusedNumberKeepsTheTypedValue() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        int retention = cfg.getRetentionMonths();
+        int pending = cfg.getPendingTimeoutHours();
+        int maxGrant = cfg.getMaxGrantMinutes();
+        assertFalse(retention == 0 || pending == 0 || maxGrant == 123, "premise: the stored values differ from the typed ones");
+
+        HtmlForm form = settingsForm(configPage("manager"));
+        UsabilityFixtures.setField(form, "retentionMonths", "0");
+        UsabilityFixtures.setField(form, "pendingTimeoutHours", "0");
+        UsabilityFixtures.setField(form, "maxGrantMinutes", "123");
+        Page answer = j.submit(form);
+
+        assertEquals(400, answer.getWebResponse().getStatusCode(), "premise: the save is refused");
+        assertEquals(retention, cfg.getRetentionMonths(), "nothing may be saved (retention)");
+        assertEquals(pending, cfg.getPendingTimeoutHours(), "nothing may be saved (pending timeout)");
+        assertEquals(maxGrant, cfg.getMaxGrantMinutes(), "nothing may be saved (maximum grant duration)");
+        HtmlPage refused = (HtmlPage) answer;
+        settingsForm(refused);
+        for (String field : new String[] {"retentionMonths", "pendingTimeoutHours"}) {
+            HtmlInput input = fieldNamed(refused, "_." + field);
+            assertEquals("0", input.getValue(), field + ": the refused value must stay in its field, not be reset to the stored"
+                    + " value");
+            DomElement item = formItem(input);
+            assertTrue(item.querySelectorAll("[name='_.maxGrantMinutes']").isEmpty(), field
+                    + ": premise: the form item holds this field only, not the whole form");
+            String text = item.asNormalizedText();
+            assertTrue(text.contains("'0' is not allowed"), field + ": the refusal message must be shown next to the field: "
+                    + UsabilityFixtures.excerpt(text));
+        }
+        assertEquals("123", fieldNamed(refused, "_.maxGrantMinutes").getValue(), "the valid typed value must be kept");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static HtmlInput fieldNamed(HtmlPage page, String name) {
+        DomNode node = page.querySelector("input[name='" + name + "']");
+        assertTrue(node instanceof HtmlInput, "the page must carry the field " + name);
+        return (HtmlInput) node;
+    }
+
+    /** The field's core form item ({@code .jenkins-form-item}), or its grandparent when there is none. */
+    private static DomElement formItem(DomElement field) {
+        for (DomNode n = field.getParentNode(); n instanceof DomElement e; n = n.getParentNode()) {
+            if (classes(e).contains("jenkins-form-item")) {
+                return e;
+            }
+        }
+        return (DomElement) field.getParentNode().getParentNode();
+    }
 
     /**
      * The D3 rows' fixture on top of this class's: change control on and a build authenticator, so
