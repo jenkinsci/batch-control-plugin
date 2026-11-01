@@ -25,8 +25,10 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,7 +92,9 @@ public class GrantKillSwitchAuditTest {
      * change control off on the global configuration form. Exactly two GRANT_REVOKE records are
      * added, exactly one identifying each window; neither window is active and u1's next save
      * answers 403. The CONFIGURE record made under u1's window is still listed on the Changes screen
-     * and still exported in {@code changes.csv} with that window's id, next to both GRANT_REVOKE rows.
+     * and still exported in {@code changes.csv} with that window's id, next to both GRANT_REVOKE rows; on
+ * the Changes screen it is still one CONFIGURE row and each revocation is one GRANT_REVOKE row
+ * naming its job or window (guard: no such row before the switch-off).
      */
     @Test
     public void t_08_287_killSwitchRevokesEachWindowOnceAndKeepsTheAuditTrail() throws Exception {
@@ -108,6 +112,10 @@ public class GrantKillSwitchAuditTest {
         assertEquals(w1.getId(), configures.get(0).getGrantId(), "premise: the CONFIGURE record is linked to u1's window (SPEC 9)");
         String configureId = configures.get(0).getId();
         assertEquals(1, csvRows(csv(), configureId, w1.getId()).size(), "premise: changes.csv exports the CONFIGURE row with the window id");
+
+        assertEquals(1, changeRows("CONFIGURE", w1.getId()).size(), "premise: the Changes screen lists u1's CONFIGURE change as a row");
+        assertTrue(revokeRows(w1.getId(), "ks-a").isEmpty() && revokeRows(w2.getId(), "ks-b").isEmpty(),
+                "guard: before the switch-off the Changes screen has no GRANT_REVOKE row for either window");
 
         Set<String> before = WindowStateFixtures.revokeRecordIds();
         Page saved = switchChangeControlOff();
@@ -134,13 +142,37 @@ public class GrantKillSwitchAuditTest {
             assertEquals(1, csvRows(exported, revoke.getId(), "GRANT_REVOKE").size(), "changes.csv must export the GRANT_REVOKE row "
                     + revoke.getId() + ": " + ApproverFormFixtures.excerpt(exported));
         }
-        WebResponse screen = ApproverFormFixtures.get(j, "admin", "batch-control/changes/");
-        assertEquals(200, screen.getStatusCode(), "the Changes screen must open after the switch-off");
-        String html = screen.getContentAsString();
-        assertTrue(html.contains(w1.getId()), "the Changes screen must still list the change made under u1's window " + w1.getId()
-                + ": " + ApproverFormFixtures.excerpt(html));
-        assertTrue(html.contains("ks-b"), "the Changes screen must list the revocation of u2's window on ks-b: "
-                + ApproverFormFixtures.excerpt(html));
+        List<String> configureRows = changeRows("CONFIGURE", w1.getId()).stream()
+                .filter(r -> r.contains("ks-a") && !r.contains("GRANT_REVOKE")).collect(Collectors.toList());
+        assertEquals(1, configureRows.size(), "the Changes screen must still list, as one row, the CONFIGURE change made on ks-a under"
+                + " u1's window " + w1.getId() + ": " + configureRows);
+        assertEquals(1, revokeRows(w1.getId(), "ks-a").size(), "the Changes screen must list the revocation of u1's window on ks-a as"
+                + " one GRANT_REVOKE row: " + revokeRows(w1.getId(), "ks-a"));
+        assertEquals(1, revokeRows(w2.getId(), "ks-b").size(), "the Changes screen must list the revocation of u2's window on ks-b as"
+                + " one GRANT_REVOKE row: " + revokeRows(w2.getId(), "ks-b"));
+    }
+
+    /**
+     * The rows (innermost {@code tr}) of the administrator's Changes screen whose text carries
+     * {@code type} as the screen renders the change type (the constant's name, as the history change
+     * list shows TRIGGER_BLOCKED in T-06-48) and names at least one of {@code names}.
+     */
+    private List<String> changeRows(String type, String... names) throws Exception {
+        HtmlPage page = UsabilityFixtures.htmlPage(j, "admin", "batch-control/changes/");
+        assertEquals(200, page.getWebResponse().getStatusCode(), "the Changes screen must open for the administrator");
+        List<String> out = new ArrayList<>();
+        for (Object o : page.getByXPath("//tr[not(.//tr)]")) {
+            String text = ((DomElement) o).asNormalizedText();
+            if (text.contains(type) && Arrays.stream(names).anyMatch(text::contains)) {
+                out.add(text);
+            }
+        }
+        return out;
+    }
+
+    /** The Changes screen's GRANT_REVOKE rows naming the window id or its job. */
+    private List<String> revokeRows(String grantId, String job) throws Exception {
+        return changeRows("GRANT_REVOKE", grantId, job);
     }
 
     // ---------------------------------------------------------------- helpers
