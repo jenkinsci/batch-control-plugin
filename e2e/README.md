@@ -107,8 +107,8 @@ class and source). Warnings are never judged. An allowlist entry that applied an
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
 counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
 made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
-references (`design-ref`, `design-ref-measured`) and `r21/reject_color.py` D (`destructive`), next to #129's
-`helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`destructive`) and `r19/gate.py` L
+(`rebuild-menu`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -770,12 +770,17 @@ adds the CLI (inside the Jenkins container), the mailpit sink (`BC_MAIL_PORT`), 
 starts with the D-31/D-34 lock and not activated), a username/password credential `r19-cred-id`, the lockable resource
 `r19-res`, a multi-configuration project `r19-mx` and an organization folder `r19-org`. Accounts are JCasC's.
 
-- `gate.py [BPARXM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
+- `gate.py [BCPARXLM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
   may request); REST `build`/`buildWithParameters`, the CLI `build`, the build token on core's endpoint and on
   build-token-root, a Pipeline Replay and the rebuild plugin's Rebuild are refused, nothing is queued, the refusals are
   recorded; an approved request runs exactly once with exactly its values, the build page names request, requester and
   approver, the request links the build; a consumed approval marker presented again is MARKER_REUSE_BLOCKED (Changes,
-  `changes.csv`).
+  `changes.csv`). Section L (#31, the check of the retired `r8/rebuild.py`; e2e-07 DEF-06): `nobc` (another user than
+  X's requester, so its attempt on the same build is not merged into X's record, D-51) opens the new job page's "More
+  actions" menu of `r19-gate`: it must list "Rebuild Last" with the rebuild URL of the last completed build (DEF-06: a
+  null URL left the whole menu empty), the entry must open the rebuild form, and its submission must be refused (4xx,
+  the approval message) with nothing queued and a TRIGGER_BLOCKED record naming `nobc` and the build. Judged by
+  `ci/h1_rules.py` (driver `rebuild-menu`: `rebuild-menu-offered`, `rebuild-menu-refused`; a missing row fails).
 - `plugins.py [NCLZHI]` (unit `r19-plugins`): naginator's retry of an approved run refused and recorded;
   customize-build-now keeps Request Run; lockable-resources and authorize-project ("Run as Specific User" admin; the
   project default authenticator is added and removed again) with an approved run; jobConfigHistory and the CLI

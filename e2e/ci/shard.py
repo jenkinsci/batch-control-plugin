@@ -257,8 +257,8 @@ UNITS = [
     # the 2026-10-08 local runs (arrangement included), calibrated against CI (above).
     Unit("r19-gate", 1.5, [("r19-arrange", py("r19/arrange.py")), ("r19-gate", py("r19/gate.py"))],
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
-             "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
-             "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+             "Replay, Rebuild, #31: Rebuild Last from the new job page's More actions), the job page notice, an approved "
+             "run exactly once with exact values, Cause on the build page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
     # e2e-24 #37 (wave A). r24/user_cause.py deletes and re-creates its own items (r24-ucause*) and activates one through
     # an approved ACTIVATE request; the deprecated cause is submitted from the script console and the CLI groovy command.
     Unit("r24-user-cause", 1.6, [("r24-user-cause", py("r24/user_cause.py"))], group="runs and switches",

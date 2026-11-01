@@ -1168,6 +1168,50 @@ def judge_destructive(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r19/gate.py L (#31, r8/rebuild.py)
+REBUILD_HREF = re.compile(r"(^|/)(lastCompletedBuild|\d+)/rebuild(/|$)")
+
+
+def judge_rebuild_menu(rows, ctx=None):
+    """#31 (the retired r8/rebuild.py; e2e-07 DEF-06, e2e-08 item 3; SPEC 6 lines 114-117 and 121): the rebuild plugin's
+    "Rebuild Last" in the new job page's "More actions" menu of an approval-required job with a completed build.
+      * rebuild-menu-offered: the menu opens with its entries, Rebuild Last is one of them with the rebuild URL of a
+        build (DEF-06: a null URL left the whole menu empty), and it opens the rebuild form (200, a rebuild URL);
+      * rebuild-menu-refused: submitting that form is refused (4xx, the approval message), nothing is queued, no build
+        starts, and a TRIGGER_BLOCKED record names the user and the re-run build "#<n>" as a Rebuild (D-51).
+    The row is required: no row, or one without the menu, fails rebuild-menu-offered."""
+    j = Judge("rebuild-menu", ctx)
+    if not rows:
+        j.fail("rebuild-menu-offered", {"row": "missing"})
+    for r in rows:
+        key = {"user": r.get("user"), "job": r.get("job")}
+        menu = r.get("menu") or []
+        entry = [m for m in menu if (m.get("text") or "") == "Rebuild Last"]
+        href = (entry[0].get("href") or "") if entry else None
+        if not r.get("build") or not menu or not entry or not REBUILD_HREF.search(href or ""):
+            j.fail("rebuild-menu-offered", dict(key, build=r.get("build"), href=href, entries=[m.get("text") for m in menu][:12]),
+                   {"console": r.get("menu_console")})
+        elif r.get("entry_status") != 200 or not REBUILD_HREF.search(r.get("entry_url") or "") or not r.get("form"):
+            j.fail("rebuild-menu-offered", dict(key, entry_status=r.get("entry_status"), entry_url=r.get("entry_url"),
+                                                form=r.get("form")), {"error": r.get("entry_error")})
+        text = (r.get("submit_text") or "").lower()
+        build = f"#{r.get('build')}"
+        recorded = [x for x in r.get("records") or [] if x.get("type") == "TRIGGER_BLOCKED" and x.get("user") == r.get("user")
+                    and build in (x.get("detail") or "") and "Rebuild" in (x.get("detail") or "")]
+        problems = []
+        if not isinstance(r.get("submit_status"), int) or r["submit_status"] < 400 or not ("approv" in text or "run request" in text):
+            problems.append("the submission was not refused with the approval message")
+        if r.get("queue") or r.get("next_build") is None or r.get("next_build") != r.get("next_build_before"):
+            problems.append("something was queued or built")
+        if not recorded:
+            problems.append("no TRIGGER_BLOCKED record naming the user and the re-run build")
+        if problems:
+            j.fail("rebuild-menu-refused", dict(key, problems=problems),
+                   {k: r.get(k) for k in ("submit_status", "submit_url", "submit_error", "queue", "next_build_before",
+                                          "next_build", "records")} | {"text": text[:160]})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1182,6 +1226,8 @@ def judge(driver, rows, ctx=None):
         return judge_targeted(driver, rows, ctx)
     if driver == "destructive":
         return judge_destructive(rows, ctx)
+    if driver == "rebuild-menu":
+        return judge_rebuild_menu(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

@@ -423,6 +423,22 @@ def _destructive_rows(drop=None, **changes):
     return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
 
 
+# #31 (r8/rebuild.py): gate.py L's row as main renders it
+def _rebuild(**change):
+    r = {"user": "nobc", "job": "r19-gate", "build": 1, "approved_build": 1, "flag": "true", "overflow_button": 1,
+         "menu": [{"text": "Rebuild Last", "tag": "a", "href": "/jenkins/job/r19-gate/lastCompletedBuild/rebuild/parameterized"},
+                  {"text": "Rename", "tag": "a", "href": "/jenkins/job/r19-gate/confirm-rename"},
+                  {"text": "Permalinks", "tag": "button", "href": None}],
+         "menu_console": [], "entry_status": 200, "entry_url": "/job/r19-gate/lastCompletedBuild/rebuild/parameterized", "form": 1,
+         "submit_status": 400, "submit_url": "/job/r19-gate/lastCompletedBuild/rebuild/configSubmit",
+         "submit_text": "Approval required. This build was not started. Job r19-gate only runs through an approved Batch Control run request.",
+         "queue": [], "next_build_before": 2, "next_build": 2,
+         "records": [{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #1 by 'nobc' - "
+                      "a re-run does not reuse an earlier approval; submit a new run request"}], "flag_restored": "true"}
+    r.update(change)
+    return r
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -718,6 +734,23 @@ def synthetic():
         ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
          "destructive-measured"),
         ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
+        # #31 (r8/rebuild.py): Rebuild Last from the new job page's More actions (gate.py L)
+        ("rebuild-menu: #31 offered with its URL, refused, nothing queued, recorded", "rebuild-menu", [_rebuild()], {}, "pass", None),
+        ("rebuild-menu: #31 DEF-06: the menu stays empty", "rebuild-menu",
+         [_rebuild(menu=[], menu_console=["pageerror: Cannot read properties of null (reading 'startsWith')"], entry_status=None,
+                   entry_url=None, form=None, submit_status=None, submit_text=None, records=[])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 DEF-06: Rebuild Last with a null URL", "rebuild-menu",
+         [_rebuild(menu=[{"text": "Rebuild Last", "tag": "a", "href": None}])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the entry does not open the rebuild form", "rebuild-menu",
+         [_rebuild(entry_status=404, form=0)], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 no row (the section did not run)", "rebuild-menu", [], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the rebuild was accepted and queued", "rebuild-menu",
+         [_rebuild(submit_status=200, submit_text="r19-gate #2", queue=[{"id": 7}], next_build=3, records=[])], {}, "fail",
+         "rebuild-menu-refused"),
+        ("rebuild-menu: #31 refused but not recorded", "rebuild-menu", [_rebuild(records=[])], {}, "fail", "rebuild-menu-refused"),
+        ("rebuild-menu: #31 recorded for another build", "rebuild-menu",
+         [_rebuild(records=[{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #7 by 'nobc'"}])],
+         {}, "fail", "rebuild-menu-refused"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],
