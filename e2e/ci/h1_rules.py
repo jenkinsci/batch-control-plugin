@@ -779,6 +779,35 @@ def incident_m4(r):
     return {k: r.get(k) for k, ok in want.items() if not ok}
 
 
+def monitor_def04(j, r):
+    """#31 DEF-04 (docs/reports/e2e-06.md): on both /manage/ visits the strategy monitor shows its arranged item; each
+    "Mark as reviewed" sits on the last line of its item's text (vertical centres within 2 px) right after it (gap 0..24
+    px, not floated to the right edge), the controls share one top (2 px), and the alert shows one icon outside its
+    buttons ("Before you install" once showed a second one) and no button more than one."""
+    if not (r.get("r31") or {}).get("listed"):
+        j.fail("def04-premise", {"r31": r.get("r31")})
+    for visit in ("layout_global", "layout_bc"):
+        lay = r.get(visit)
+        if not lay:
+            j.fail("def04-monitor-shown", {"visit": visit, "layout": lay})
+            continue
+        if visit == "layout_global" and not lay.get("before_install"):
+            j.fail("def04-before-install-shown", {"visit": visit})
+        measured = [m for m in lay.get("marks") or [] if not m.get("nested") and m.get("line")]
+        if not measured:
+            j.fail("def04-mark-measured", {"visit": visit, "marks": lay.get("marks")})
+        for m in measured:
+            if m.get("dy") is None or m["dy"] > 2 or m.get("gap") is None or not 0 <= m["gap"] <= 24:
+                j.fail("def04-mark-beside-item", {"visit": visit, "item": m.get("item")}, m)
+        tops = [c["box"][1] for c in lay.get("controls") or []]
+        if tops and max(tops) - min(tops) > 2:
+            j.fail("def04-controls-top", {"visit": visit, "controls": lay.get("controls")})
+        if lay.get("icons") != 1:
+            j.fail("def04-alert-icons", {"visit": visit, "icons": lay.get("icons"), "classes": lay.get("icon_classes")})
+        for b in lay.get("button_icons") or []:
+            j.fail("def04-button-icons", {"visit": visit, "button": b})
+
+
 def judge_targeted(name, rows, ctx=None):
     j = Judge(name, ctx)
     for r in rows:
@@ -813,6 +842,18 @@ def judge_targeted(name, rows, ctx=None):
             for h in r.get("helps") or []:
                 if h.get("status") != 200 or (h.get("chars") or 0) < 20 or h.get("expands") is not True:
                     j.fail("help", {"page": r.get("page"), "help": h})
+            # #31 E2E-D4: a label never overlaps or runs into its description/help text on the global configuration
+            # pages (helpcheck.py LAYOUT; rows before #31 have no "layout" and are not judged). The section must be
+            # there with its labels and at least one label/text pair measured, so an empty page is no pass.
+            lay = r.get("layout")
+            if lay is not None:
+                if lay.get("sections", 0) < 1 or lay.get("labels", 0) < 10 or lay.get("pairs", 0) < 1:
+                    j.fail("label-layout-premise", {"page": r.get("page"),
+                                                    **{k: lay.get(k) for k in ("sections", "labels", "pairs")}})
+                for x in lay.get("overlap") or []:
+                    j.fail("label-description-overlap", {"page": r.get("page"), "label": x.get("label")}, x)
+                for x in lay.get("runin") or []:
+                    j.fail("label-description-same-line", {"page": r.get("page"), "label": x.get("label")}, x)
             j.console("console", r.get("console"), {"page": r.get("page")})
         elif name == "help2":
             if not (r.get("after", 0) > r.get("before", 0)):
@@ -828,6 +869,8 @@ def judge_targeted(name, rows, ctx=None):
             if n and (r.get("after_mark_cancel") != n or r.get("after_mark_ok") != n - 1
                       or [x for x in r.get("mark_links_on_page") or [] if x[1] >= 400]):
                 j.fail("mark-reviewed", {k: r.get(k) for k in ("mark_links", "after_mark_cancel", "after_mark_ok", "mark_links_on_page")})
+            if "layout_bc" in r:  # #31 DEF-04 (s_monitor.py MONITOR; rows before #31 have no layout and are not judged)
+                monitor_def04(j, r)
             j.console("console", r.get("console"), {"page": "/manage/"})
     return j
 

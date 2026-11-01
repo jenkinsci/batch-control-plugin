@@ -341,6 +341,23 @@ def _rerun_refusal(change=None):
     return r
 
 
+# #31 E2E-D4: helpcheck.py's "layout" of a global configuration page as main renders it
+_LAY = {"sections": 1, "labels": 12, "pairs": 12, "overlap": [], "runin": []}
+
+
+def _monitor_def04(listed=True, **visit):
+    """#31 DEF-04: an s_monitor.py row as main renders it (Install and Mark as reviewed passing), with `visit` changed."""
+    lay = {"before_install": True, "marks": [{"item": "team", "nested": False, "button": [817, 510, 962, 548],
+                                              "line": [153, 521, 811, 538], "dy": 0, "gap": 6}],
+           "controls": [{"text": "Install the Batch Control variant", "box": [970, 201, 1200, 237]},
+                        {"text": "Dismiss", "box": [1208, 201, 1244, 237]}],
+           "icons": 1, "button_icons": [], "icon_classes": ["app-adminmonitor-icon"]}
+    return {"before": "BatchControlMatrixAuthorizationStrategy", "plain": "GlobalMatrixAuthorizationStrategy", "warned": True,
+            "dialog": True, "after_cancel": "GlobalMatrixAuthorizationStrategy", "after_ok": "BatchControlMatrixAuthorizationStrategy",
+            "install_gone": True, "restored": "BatchControlMatrixAuthorizationStrategy", "console": [],
+            "r31": {"listed": listed}, "layout_global": dict(lay, **visit), "layout_bc": dict(lay, **visit, before_install=False)}
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -560,6 +577,25 @@ def synthetic():
            "destinations": ["/ops", "/team"], "status": 403, "links": [["z", "/job/prod/job/z/", 200]], "still_in_prod": 200}], {}, "pass", None),
         ("misc: the move refusal never reached (no destination)", "misc",
          [{"sec": "R", "case": "move refusal", "role": "mover1", "move_page": 200, "destinations": [], "still_in_prod": 200}], {}, "fail", "R-move"),
+        ("help: #31 E2E-D4 description on the checkbox caption's line", "help",
+         [{"page": "/manage/batch-control-configuration/", "helps": [], "console": [],
+           "layout": dict(_LAY, runin=[{"label": "Enable run control", "labelBox": [10, 100, 130, 118], "descBox": [130, 100, 600, 118]}])}], {}, "fail", "label-description-same-line"),
+        ("help: #31 E2E-D4 label and description boxes overlap", "help",
+         [{"page": "/manage/configure", "helps": [], "console": [],
+           "layout": dict(_LAY, overlap=[{"label": "Enable run control", "labelBox": [10, 100, 130, 118], "descBox": [100, 110, 600, 130]}])}],
+         {}, "fail", "label-description-overlap"),
+        ("help: #31 E2E-D4 no Batch Control section measured", "help",
+         [{"page": "/manage/configure", "helps": [], "console": [], "layout": dict(_LAY, sections=0, labels=0, pairs=0)}], {}, "fail",
+         "label-layout-premise"),
+        ("help: #31 E2E-D4 every label above its text", "help",
+         [{"page": "/manage/configure", "helps": [], "console": [], "layout": dict(_LAY)}], {}, "pass", None),
+        ("monitor: #31 DEF-04 Mark as reviewed floated to the right edge on its own line", "monitor",
+         [_monitor_def04(marks=[{"item": "r31-monitor-layout", "nested": False, "button": [1090, 520, 1235, 558],
+                                 "line": [271, 483, 1027, 500], "dy": 47.5, "gap": 63}])], {}, "fail", "def04-mark-beside-item"),
+        ("monitor: #31 DEF-04 Before you install shows the icon twice", "monitor",
+         [_monitor_def04(icons=2, icon_classes=["app-adminmonitor-icon", "icon-sm"])], {}, "fail", "def04-alert-icons"),
+        ("monitor: #31 DEF-04 the arranged item never listed", "monitor", [_monitor_def04(listed=False)], {}, "fail", "def04-premise"),
+        ("monitor: #31 DEF-04 buttons beside their items, one icon", "monitor", [_monitor_def04()], {}, "pass", None),
         ("help: a help block that does not open", "help2", [{"page": "/x", "help": "y", "before": 3, "after": 3}], {}, "fail", "help-click"),
         ("role: Manage Roles save loses the window (200 -> 403)", "role/grant_overlay",
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
