@@ -195,6 +195,40 @@ public class RequesterBuildNoticeCacheTest {
     }
 
     /**
+     * T-05-207 (#75, SPEC 5 D-38a; #31, retired driver r9/s75.py): the notice as seen by an approver
+     * added by a re-designation. Guard first: nb (no Item/Build) files a request to a1 and adds a2 to
+     * its approvers; a2's first and second view of it both show the notice. Then nb's other request
+     * shows the notice to a1 (premise), nb gains Item/Build and adds a2 to that request too (a save);
+     * a2's first view and second, cached view of it both show no notice. A cache that kept the answer
+     * from before the save, or computed it per viewer, fails one of the four views.
+     */
+    @Test
+    public void t_05_207_newlyDesignatedApproverSeesTheReevaluatedNoticeOnEveryView() throws Exception {
+        JenkinsRule.WebClient a2 = client("a2");
+
+        String lacking = submitRunOk(j, "nb", job, "guard batch", "a1");
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.changeRunApprovers(j, "nb", lacking, "a1", "a2"),
+                "guard: nb adds a2 to the approvers of the request");
+        for (int view = 1; view <= 2; view++) {
+            String text = detailText(a2, lacking);
+            assertTrue(text.contains(NOTICE), "guard: view " + view + " by the newly designated a2 must show the notice while nb lacks"
+                    + " Item/Build: " + excerpt(text));
+        }
+
+        String id = submitRunOk(j, "nb", job, "month-end batch", "a1");
+        assertTrue(detailText(client(), id).contains(NOTICE), "premise: a1 sees the notice on the request");
+        j.jenkins.setAuthorizationStrategy(strategy(true));
+        assertTrue(can("nb", Item.BUILD), "premise: nb now holds Item/Build on batch-x");
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.changeRunApprovers(j, "nb", id, "a1", "a2"),
+                "nb adding a2 to the approvers of the own request");
+        for (int view = 1; view <= 2; view++) {
+            String text = detailText(a2, id);
+            assertFalse(text.contains("does not have Build permission"), "view " + view + " by the newly designated a2 must not show"
+                    + " the notice (nb now holds Item/Build and the request was saved): " + excerpt(text));
+        }
+    }
+
+    /**
      * T-05-39 (#75, TTL on the plugin clock): with the plugin clock fixed, nb's request shows the
      * notice; nb gains Item/Build and the clock moves 6 minutes on (beyond the 5-minute cache life);
      * the same request's page no longer shows the notice.
@@ -252,7 +286,12 @@ public class RequesterBuildNoticeCacheTest {
 
     /** a1's client: redirects off, HtmlUnit's response cache off so that every view reaches Jenkins. */
     private JenkinsRule.WebClient client() throws Exception {
-        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, "a1");
+        return client("a1");
+    }
+
+    /** {@code userId}'s client: redirects off, HtmlUnit's response cache off. */
+    private JenkinsRule.WebClient client(String userId) throws Exception {
+        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, userId);
         wc.getCache().setMaxSize(0);
         return wc;
     }
@@ -271,7 +310,7 @@ public class RequesterBuildNoticeCacheTest {
     private String detailText(JenkinsRule.WebClient wc, String id) throws Exception {
         org.htmlunit.Page got = wc.getPage(new WebRequest(new java.net.URL(j.getURL(), "batch-control/requests/" + id + "/?view=" + System.nanoTime())));
         WebResponse response = got.getWebResponse();
-        assertEquals(200, response.getStatusCode(), "a1 must be able to open the request detail page");
+        assertEquals(200, response.getStatusCode(), "the approver must be able to open the request detail page");
         assertTrue(got instanceof org.htmlunit.html.HtmlPage, "the detail page must be HTML");
         org.htmlunit.html.HtmlPage page = (org.htmlunit.html.HtmlPage) got;
         String text = page.asNormalizedText().replaceAll("\\s+", " ");
