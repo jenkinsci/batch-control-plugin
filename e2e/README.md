@@ -383,8 +383,7 @@ itself did not succeed. Its log gives the reason in one line.
   role profile).
 - Base URL, passwords and ports were already configurable (`BC_BASE`, `e2e/.env`, `BC_PORT`). The `mails()` helpers
   of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers (now in
-  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set (`legacy/browser/explore.mjs` writes
-  to a fixed local scratch path; it is an ad-hoc orientation script, not evidence).
+  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set.
 
 ## How it is configured
 
@@ -454,6 +453,14 @@ Screenshots are kept on the machine that ran the pass and are **never committed*
 (`docs/reports/e2e-*.md`), `CHECKLIST.md` and `reaudit/results.jsonl` still name each capture
 (for example `run-3-verify/B5-01-refusal-page.png`) so that it can be looked up on that machine.
 The e2e-01/02 images that were committed earlier are no longer tracked.
+
+## Removed drivers
+
+Stage one of #31 removed 69 files that CI supersedes or that never gave a verdict: copies or older versions of CI
+drivers (`r11`..`r15`, all of `r13/`), the REST scripts `scripts/rest-run-request.sh`, `rest-blocked-build.sh` and
+`rest-csv-export.sh`, the scripts `approvers-clear.sh`, `approvers-restore.sh` and `executors.sh`, and ad-hoc
+probes and screenshot helpers (some of them in `legacy/`). The reports in `docs/reports/` still name them. To read
+one, find the removing commit with `git log --diff-filter=D --oneline -- e2e/<path>` and restore it with `git show <commit>^:e2e/<path>`.
 
 ## Legacy Node.js drivers (`legacy/`)
 
@@ -531,14 +538,14 @@ Round E2E-6 (hosting review round 3, 2026-10-04). `r11/lib.py` is `r10/lib.py` w
 `screenshots/run-11/` and logs in `r11/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
 `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py` and `r11/arrange.py` (users `classic`, the requester's
 permissions with the new job page turned off, and `fonly`, Read+Move+RequestGrant; `ops/a`, `ops/sub/b`, the
-multibranch `ops/mb`, the non-approval job `fast`). `seed_fast.py` queues 60 admin builds of `fast` for the
+multibranch `ops/mb`, the non-approval job `fast`). `r14/seed_fast.py` queues 60 admin builds of `fast` for the
 dashboard bound. Scenarios: `s_dialogs.py [ADGH]` (grant and Request Run dialogs on the new UI, D-60, unknown ids),
 `s_rundlg_err.py`, `s_approve.py <run id> <grant id>`, `s_classic.py` (classic sidebar dialogs, folder-page dialog
 filing a window on the folder), `approve_api.py` / `grant_api.py` (arrangement over HTTP), `move.py` (copy of `r10/move.py`), `s_revoke.py` / `s_revoke_holder.py`, `s_activation.py`,
 `s_pages.py`, `s_width.py`, `s_tabs.py` (turns `new-build-page.flag` on for admin and back), `s_modellink.py`,
 `s_lacks_build.py`, `s_newmenu.py`, `s_d38b.py`, `r_role.py` and `d59b.py` (both replace the matrix profile; re-run
 the arrange scripts afterwards), `s_dark_monitor.py`, and `j25.py` for the Java 25 smoke under `compose.jdk25.yml`.
-Diagnostics kept as evidence: `console_check.py`, `recon_overflow.py`, `probe_tick2.py`.
+Diagnostic kept as evidence: `probe_tick2.py`.
 
 ## e2e-10 driver (`r10/`)
 
@@ -572,10 +579,6 @@ create state and are not idempotent: run them once on a fresh JENKINS_HOME, in t
 from e2e-01/e2e-02; `lib.sh` knows every account above. `scripts/cli.sh <user>
 <command>` runs jenkins-cli inside the container (it needs Java 21).
 
-`legacy/browser/audit-shots.mjs` lists screenshots that break the rule (no red box or a
-full-viewport capture); `legacy/browser/fix-shots.mjs` re-crops such a capture to its
-content and boxes it.
-
 ## Re-audit driver (`legacy/browser/audit/`)
 
 The five-criterion re-audit of run 3 (checklist 0a) lives in `legacy/browser/audit/`:
@@ -584,8 +587,7 @@ one script per section (`e1.mjs`, `e10.mjs`, `sa-read.mjs`, `a02.mjs` ... `b15.m
 `out/audit.jsonl` (copied to `reaudit/results.jsonl` at each commit; the last line
 per id wins) and `amend.mjs <id> '<json>'` re-appends a row with corrected cells.
 Run with `BC_SHOTS=run-3-audit` so `shot()` writes to `screenshots/run-3-audit/`
-(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`). `audit/audit-shots.mjs` and
-`audit/fix-shots.mjs` are the screenshot checks for that directory.
+(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`).
 
 `init.groovy.d/20-sample-jobs.groovy` runs on the first boot only and leaves
 existing items alone, so a fix to a seed job does not reach a kept `JENKINS_HOME`:
@@ -619,12 +621,10 @@ added matrix entries).
 
 Round E2E-7 (every button, link and dialog, 2026-10-04). `r12/lib.py` loads `r6/lib.py` with screenshots in
 `screenshots/run-12/` and logs in `r12/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
-`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then `seed_fast.py`, `seed.py` (requests,
-activations, windows, changes and incidents through the plugin's own endpoints; ids to `out/ids.json`) and
-`seed_paging.py`. `run_crawl.sh` (`crawl.py <role> <new|classic>` for six roles, `set_flag.py` switches the new job
-page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State-changing controls: `actions.py`;
-entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
-`helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
+`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then the seed scripts. Of the round's
+scripts only `lib.py`, `arrange.py` and `s_monitor.py` stay here; the crawl, seed, action, job-UI and targeted
+scripts live on, extended, as their `r14/` counterparts, which CI runs (the older r12 versions were removed in stage one of
+#31, see "Removed drivers").
 
 ## Gap H3 driver (`h3/`): upgrade from the released plugin
 
@@ -813,31 +813,24 @@ seeded before the e2e-15 seed fix) and indexes it (`main`, `feature-1`). `check.
 page on and off: every side-panel, app-bar, breadcrumb and main-panel control on the activation pages of `team-mb`, its
 two branch jobs, `batch-pipeline` and `batch-daily`; approver-1 404), `check.py submit <flag> <page> <user>`, `menu.py`
 (app-bar More actions on each job page vs its activation sub-page; disable `rebuild` first for `batch-daily`, see the
-e2e-06 note), `side_dialog.py`, `folder_compare.py`, and `probe.py` (diagnostic). Stop with
+e2e-06 note), `side_dialog.py` and `folder_compare.py`. Stop with
 `docker compose -p bc-e2e15 -f docker-compose.yml -f compose.prefix.yml down -v`.
 
 ## e2e-14 driver (`r14/`)
 
 Final check of `main` after rounds 3 and 4 (2026-10-04). `r14/lib.py` is `r12/lib.py` with screenshots in
-`screenshots/run-14/` and logs in `r14/out/`; the r12 scripts are copied unchanged apart from their docstrings.
+`screenshots/run-14/` and logs in `r14/out/`; the r12 scripts were copied here and have since been extended (H1
+judging, M4), so the r14 versions are the current ones.
 Fresh JENKINS_HOME under its own compose project:
 `docker compose -p bc-e2e14 -f docker-compose.yml -f compose.prefix.yml up -d --build`, then the r12 arrangement plus
 `arrange_fast.py` (removes the new-job lock from `fast`, which the script console creates while run control is on)
 before `seed_fast.py`. New scripts: `def07.py <new|classic> [role ...]` (e2e-12 DEF-07 recheck: filter URLs, pager and
-export links keep the filter), `round3.py [ABCDEFGHI]` (the e2e-11 round-3 checks with assertions), `probe_pageerror.py`
-(diagnostic). `role/` holds the e2e-13 role-strategy drivers with `BC_BASE` defaulting to the `/jenkins` prefix;
+export links keep the filter), `round3.py [ABCDEFGHI]` (the e2e-11 round-3 checks with assertions). `role/` holds the e2e-13 role-strategy drivers with `BC_BASE` defaulting to the `/jenkins` prefix;
 `grant_overlay.py` now opens the grants page dialog (D-66). Run `role/` last: `setup.py` replaces the matrix profile.
 Stop with `docker compose -p bc-e2e14 down -v`.
 
 ## e2e-13 driver (`r13/`)
 
-role-strategy 927 forwarding check (D-35g, 2026-10-04). `r13/lib.py` loads `r6/lib.py` with base URL
-`http://localhost:8080` (plain `docker-compose.yml`, override with `BC_BASE`), screenshots in
-`screenshots/run-13/` and logs in `r13/out/`. `PY=<venv python> r13/run_all.sh` starts a fresh
-JENKINS_HOME under the separate compose project `bc-e2e13` (the shared `batch-control-e2e` volume is
-left alone) and runs, in order: `setup.py` (applies `casc/profile-role.yaml`), `manage_roles.py`
-(Add Role dialog, pattern check), `assign_roles.py` (Add User or Group dialog, sid check, assign,
-unassign, remove), `grant_overlay.py` (CONFIGURE window on `team/app-1` over role-strategy roles,
-Manage Roles save during the window, revoke) and `endpoints.py` (forwarded bodies against
-role-strategy's own descriptor, 403/405 refusals). `reset_nobc.py` clears `nobc`'s assignments to
-re-run `assign_roles.py` alone. Stop with `docker compose -p bc-e2e13 down -v`.
+role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were removed in stage one of #31 (see
+"Removed drivers"): `r14/role/` holds their successors, run by CI under the `/jenkins` prefix (`setup.py` applies
+`casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).

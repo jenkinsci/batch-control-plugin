@@ -15,7 +15,7 @@
 #      (configure is still 403)
 #
 # The switch is flipped through the script console, the same way
-# approvers-clear.sh changes the global configuration: the setter is where the
+# the removed approvers-clear.sh changed the global configuration: the setter is where the
 # revocation lives, so this exercises the behaviour under test. Change control is
 # always turned back on at the end, even when a check fails.
 #
