@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
 import hudson.cli.CLICommandInvoker;
+import hudson.model.Cause;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -8,12 +9,17 @@ import hudson.model.Job;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import java.io.ByteArrayInputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 import javaposse.jobdsl.plugin.ExecuteDslScripts;
 import javaposse.jobdsl.plugin.GlobalJobDslSecurityConfiguration;
 import jenkins.model.GlobalConfiguration;
@@ -298,6 +304,121 @@ public class NewJobActivationLockTest {
         j.waitUntilNoActivity();
 
         assertLocked(job("dsl-nightly"), "a Job DSL seed run");
+    }
+
+    /**
+     * T-08-288 (SPEC 8 D-31/D-34 "a newly created job starts approvalRequired, blockTimer and
+     * blockUpstream on, whatever the creation path"; SPEC 6a D-59a names the same lock with
+     * {@code allowedUpstreamJobs} emptied; SPEC 6a "no configuration write path can activate a job"):
+     * the REST {@code createItem} payload is a job's own config.xml carrying an opted-out property
+     * ({@code approvalRequired}, {@code blockTimer}, {@code blockUpstream} false, upstream allow list
+     * [{@code d34-upstream}]). Guard first, run control off: the payload is kept as given, so it really
+     * opts out. Run control on: the created job carries one property with the lock and no allow list;
+     * its timer is refused, and even after an approved activation its timer and an upstream call from
+     * {@code d34-upstream} are refused (blocking baseline). Guard: the job created from the same payload
+     * while run control was off passes both causes now that run control is on.
+     */
+    @Test
+    public void t_08_288_creationPayloadCannotOptOutOfTheLock() throws Exception {
+        setRunControl(false);
+        FreeStyleProject upstream = j.createFreeStyleProject("d34-upstream");
+        FreeStyleBuild upstreamRun = j.buildAndAssertSuccess(upstream);
+        FreeStyleProject template = j.createFreeStyleProject("d34-template");
+        BatchControlJobProperty open = new BatchControlJobProperty(false);
+        open.setBlockTimer(false);
+        open.setBlockUpstream(false);
+        open.setAllowedUpstreamJobs(List.of("d34-upstream"));
+        BatchControlFixtures.setBatchControl(template, open);
+        String payload = template.getConfigFile().asString();
+        assertTrue(payload.contains("BatchControlJobProperty") && payload.contains("d34-upstream"),
+                "fixture: the payload carries the opted-out property: " + payload);
+
+        JenkinsRule.WebClient admin = webClient().login("admin");
+        assertTrue(createFromXml(admin, "", "d34-optout-off", payload) < 400, "guard: the creation with run control off must succeed");
+        FreeStyleProject kept = job("d34-optout-off");
+        BatchControlJobProperty keptProperty = kept.getProperty(BatchControlJobProperty.class);
+        assertNotNull(keptProperty, "guard: with run control off the payload's property is kept");
+        assertFalse(keptProperty.isApprovalRequired() || keptProperty.isBlockTimer() || keptProperty.isBlockUpstream(),
+                "guard: with run control off the payload's switches are kept off (the payload really opts out)");
+        assertEquals(List.of("d34-upstream"), keptProperty.getAllowedUpstreamJobs(), "guard: the payload's allow list is kept");
+
+        setRunControl(true);
+        assertTrue(createFromXml(admin, "", "d34-optout", payload) < 400, "the REST creation with the opt-out payload must succeed");
+        FreeStyleProject created = job("d34-optout");
+        assertEquals(1, created.getProperties().values().stream().filter(p -> p instanceof BatchControlJobProperty).count(),
+                "the created job must carry exactly one Batch Control property");
+        assertLocked(created, "a REST createItem whose payload opts out");
+        List<String> allowed = created.getProperty(BatchControlJobProperty.class).getAllowedUpstreamJobs();
+        assertTrue(allowed == null || allowed.isEmpty(), "the payload's upstream allow list must not survive the lock, got " + allowed);
+
+        assertNull(created.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                "SPEC 6a: a job created under run control is not activated, so its timer is refused");
+        assertBlockingBaseline(created);
+        BatchControlFixtures.activate(created);
+        assertNull(created.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                "D-34: once activated, the timer is still refused by the lock's blockTimer, not the payload's false");
+        assertNull(created.scheduleBuild2(0, new Cause.UpstreamCause(upstreamRun)),
+                "D-34: once activated, d34-upstream is still refused: the payload's allow list did not survive");
+        assertBlockingBaseline(created);
+
+        // guard: the same two causes pass on the job the same payload created while run control was off
+        j.assertBuildStatusSuccess(kept.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        j.assertBuildStatusSuccess(kept.scheduleBuild2(0, new Cause.UpstreamCause(upstreamRun)));
+        j.waitUntilNoActivity();
+        assertEquals(2, kept.getBuilds().size(), "guard: the unlocked twin runs from its timer and from d34-upstream");
+    }
+
+    /**
+     * T-08-289 (SPEC 8 D-34 "to bring it into service the switch is turned off in the job
+     * configuration, a change that is recorded"; SPEC 9 REST {@code config.xml} path; SPEC 6a
+     * activation): a job created through REST {@code createItem} with no plugin property is locked
+     * (premise). The administrator POSTs its {@code config.xml} with {@code blockTimer} false: 200,
+     * the property reads blockTimer off with approvalRequired and blockUpstream still on, and exactly
+     * one new CONFIGURE record names the job and admin, its diff naming {@code blockTimer}. The timer
+     * is still refused while the job is not activated (SPEC 6a); after an approved activation the same
+     * timer cause builds (SUCCESS, one build).
+     */
+    @Test
+    public void t_08_289_clearingBlockTimerThroughConfigXmlIsRecordedAndOpensTheTimerOnceActivated() throws Exception {
+        JenkinsRule.WebClient admin = webClient().login("admin");
+        assertTrue(createFromXml(admin, "", "d34-plain", PLAIN_FREESTYLE_XML) < 400, "the REST creation must succeed");
+        FreeStyleProject created = job("d34-plain");
+        assertLocked(created, "a REST createItem without a plugin property");
+
+        Set<String> before = configureRecordIds("d34-plain");
+        String xml = created.getConfigFile().asString();
+        String cleared = xml.replace("<blockTimer>true</blockTimer>", "<blockTimer>false</blockTimer>");
+        assertFalse(cleared.equals(xml), "fixture: the stored config.xml names blockTimer true: " + xml);
+        WebRequest post = new WebRequest(admin.createCrumbedUrl(created.getUrl() + "config.xml"), HttpMethod.POST);
+        post.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
+        post.setRequestBody(cleared);
+        assertEquals(200, admin.getPage(post).getWebResponse().getStatusCode(), "the administrator's config.xml POST must succeed");
+
+        created = job("d34-plain");
+        BatchControlJobProperty property = created.getProperty(BatchControlJobProperty.class);
+        assertFalse(property.isBlockTimer(), "the POST must clear blockTimer");
+        assertTrue(property.isApprovalRequired() && property.isBlockUpstream(), "the other switches must stay on");
+
+        List<ChangeRecord> added = ApproverFormFixtures.records(ChangeType.CONFIGURE).stream()
+                .filter(r -> "d34-plain".equals(r.getTarget()) && !before.contains(r.getId())).collect(Collectors.toList());
+        assertEquals(1, added.size(), "SPEC 9: the change through config.xml leaves exactly one CONFIGURE record: " + added.size());
+        assertEquals("admin", added.get(0).getUser(), "the CONFIGURE record names who changed the switch");
+        assertTrue(String.valueOf(added.get(0).getDiff()).contains("blockTimer"), "the CONFIGURE record's diff shows the switch: "
+                + added.get(0).getDiff());
+
+        assertNull(created.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                "SPEC 6a: clearing blockTimer alone does not let a job that is not activated run on its timer");
+        assertBlockingBaseline(created);
+        BatchControlFixtures.activate(created);
+        Future<FreeStyleBuild> firing = created.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
+        assertNotNull(firing, "D-34: activated and with blockTimer cleared, the timer cause is admitted");
+        j.assertBuildStatusSuccess(firing);
+        assertEquals(1, created.getBuilds().size(), "exactly one build from the timer");
+    }
+
+    private static Set<String> configureRecordIds(String target) {
+        return ApproverFormFixtures.records(ChangeType.CONFIGURE).stream().filter(r -> target.equals(r.getTarget()))
+                .map(ChangeRecord::getId).collect(Collectors.toSet());
     }
 
     // ---------------------------------------------------------------- helpers
