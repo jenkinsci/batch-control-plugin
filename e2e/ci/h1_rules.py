@@ -421,12 +421,16 @@ def transient_widget_entry(r, res, target):
 def design_refs(j, r, base, ctx):
     """#31 (the retired r6/s6.py): no internal design reference ("SPEC item", "D-61", ...) on a page a user sees.
     r14/crawl.py's CONTENT_JS scans every page below 400 (and again behind Advanced) and puts the scan on the row as
-    "design" = {texts, skipped, refs}. Each ref FAILS design-ref; a row without the scan, or one that scanned no text,
-    FAILS design-ref-measured (the measurement is required). Only selftest_h1.py's replay of rows recorded before #31
-    passes ctx pre31_design_ref."""
+    "design" = {texts, skipped, refs, type}. Each ref FAILS design-ref; a row without the scan, or an HTML document
+    (type text/html, or no type) whose scan read no text, FAILS design-ref-measured (the measurement is required). A
+    document of another type (the JSON of /batch-control/history/summary, shown by Chromium inside a <pre>) is data, not
+    UI copy, and needs no scanned text. Only selftest_h1.py's replay of rows recorded before #31 passes ctx
+    pre31_design_ref."""
     d = r.get("design")
-    if not (ctx or {}).get("pre31_design_ref") and (not isinstance(d, dict) or not d.get("texts")):
-        j.fail("design-ref-measured", dict(base, kind=r.get("kind"), design="missing" if d is None else "no text scanned"))
+    html = isinstance(d, dict) and (d.get("type") or "text/html") in ("text/html", "application/xhtml+xml")
+    if not (ctx or {}).get("pre31_design_ref") and (not isinstance(d, dict) or (html and not d.get("texts"))):
+        j.fail("design-ref-measured", dict(base, kind=r.get("kind"), design="missing" if d is None else "no text scanned",
+                                           type=d.get("type") if isinstance(d, dict) else None))
     refs = (d.get("refs") or []) if isinstance(d, dict) else []
     for x in refs:
         j.fail("design-ref", dict(base, match=x.get("match")), x)

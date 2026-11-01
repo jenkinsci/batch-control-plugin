@@ -64,8 +64,10 @@ Content checks (CI, 2026-10-05), on every page reached with status < 400, all ro
 Design references (#31, the check of the retired r6/s6.py), judged by ci/h1_rules.py, not here: CONTENT_JS also scans
 the whole body (shown or hidden text, <template> contents, the title/tooltip/aria-label/placeholder attributes; never
 pre/code/textarea) for an internal design reference ("SPEC item", "SPEC section", "D-<nn>", "DECISIONS.md",
-"TEST-MATRIX") and the page row (and an Advanced row) carries the scan as "design" ({texts, skipped, refs}): a ref is a
-"FAIL crawl design-ref", a page below 400 without a scan (or with no text scanned) a "FAIL crawl design-ref-measured".
+"TEST-MATRIX") and the page row (and an Advanced row) carries the scan as "design" ({texts, skipped, refs, type}): a ref
+is a "FAIL crawl design-ref", a page below 400 without a scan (or an HTML page with no text scanned) a "FAIL crawl
+design-ref-measured". A document that is not HTML (the JSON of /batch-control/history/summary, which Chromium shows in a
+<pre>) is data, not UI copy: its type is recorded and it needs no scanned text.
 Text an e2e driver typed (it contains "e2e-<digit>", e.g. a reason "e2e-17 D-75 ...") is user data and only counted.
 Advanced (D1 follow-up, owner decision 2026-10-14): on every page reached, core's Advanced controls of the main panel
 are pressed after the page has been checked as loaded, and the content checks run again, so what sits behind Advanced
@@ -212,7 +214,7 @@ CONTENT_JS = r"""
   // is user data: counted as skipped, not judged. ci/h1_rules.py judges the result (design-ref, design-ref-measured).
   const DESIGN = /\bSPEC (?:item|section)\b|\bD-\d{2,3}[a-z]?\b|\bDECISIONS\.md\b|\bTEST-MATRIX\b/;
   const TYPED = /\be2e-\d/;
-  const design = {texts: 0, skipped: 0, refs: []};
+  const design = {texts: 0, skipped: 0, refs: [], type: document.contentType};
   const designText = (t, where) => { const v = (t || '').replace(/\s+/g, ' ').trim(); if (!v) return; design.texts++;
     const m = DESIGN.exec(v); if (!m) return; if (TYPED.test(v)) { design.skipped++; return; }
     if (design.refs.length < 20) design.refs.push({match: m[0], text: v.slice(0, 160), el: where}); };
@@ -269,7 +271,7 @@ _content_seen = set()
 
 def content_checks(s, path, pt):
     """The content checks of the docstring; one FAIL line per (check, pattern, finding), every finding logged. Returns
-    the page's design-reference scan ({"texts", "skipped", "refs"}, #31), which the caller puts on the page (or
+    the page's design-reference scan ({"texts", "skipped", "refs", "type"}, #31), which the caller puts on the page (or
     advanced) row for ci/h1_rules.py; None when CONTENT_JS failed (the rules then report the measurement missing)."""
     try:
         c = s.page.evaluate(CONTENT_JS)

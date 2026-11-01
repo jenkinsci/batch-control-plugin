@@ -254,7 +254,7 @@ def crawl_ctx(role="admin", ui="new", profile="matrix"):
 
 
 # #31: the design-reference scan r14/crawl.py puts on every page row below 400 (a clean page as main renders it)
-DESIGN_OK = {"texts": 120, "skipped": 0, "refs": []}
+DESIGN_OK = {"texts": 120, "skipped": 0, "refs": [], "type": "text/html"}
 
 
 def page(path, status=200, role="admin", ui="new", console=(), design="clean"):
@@ -664,6 +664,12 @@ def synthetic():
          [page(req, design=None)], crawl_ctx(), "fail", "design-ref-measured"),
         ("crawl: #31 a scan that read no text", "crawl",
          [page(req, design={"texts": 0, "skipped": 0, "refs": []})], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 an HTML page whose scan read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": [], "type": "text/html"})], crawl_ctx(), "fail",
+         "design-ref-measured"),
+        ("crawl: #31 a JSON document (shown in a <pre>) needs no scanned text", "crawl",
+         [page("/batch-control/history/summary", design={"texts": 0, "skipped": 0, "refs": [], "type": "application/json"})],
+         crawl_ctx(), "pass", None),
         ("crawl: #31 an Advanced row without the scan", "crawl",
          [page("/manage/batch-control-configuration/"),
           {"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded"}],
