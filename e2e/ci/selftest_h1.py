@@ -200,6 +200,10 @@ def upgrade(unit):
                 if h.get("expands") == "no-help-area":
                     h["expands"] = True  # T-01: helpcheck2 shows each of these clicks adds one visible help block
         out.append(r)
+    if d == "crawl":
+        SKIPPED.append(("crawl design references", "#31 (r6/s6.py): the recorded crawl rows carry no design-reference scan "
+                                                   "(crawl.py records it since #31), so the replay waives the required "
+                                                   "scan (ctx pre31_design_ref); the synthetic cases cover it"))
     if d == "help":
         SKIPPED.append(("help layout", "#31 E2E-D4: the recorded help rows carry no layout (helpcheck.py measures it since "
                                        "#31), so the replay waives the required layout (ctx pre31_layout); the synthetic "
@@ -228,6 +232,8 @@ def replay(units):
         ctx = u["ctx"]
         if u["driver"] == "help":  # #31: the recorded help rows predate the E2E-D4 layout; it cannot be replayed
             ctx = dict(ctx or {}, pre31_layout=True)
+        if u["driver"] == "crawl":  # #31: the recorded crawl rows predate the design-reference scan
+            ctx = dict(ctx or {}, pre31_design_ref=True)
         lines = h1.judge(u["driver"], rows, ctx).lines()
         for line in lines:
             if line.startswith("FAIL "):
@@ -247,8 +253,15 @@ def crawl_ctx(role="admin", ui="new", profile="matrix"):
     return {"role": role, "ui": ui, "ids": IDS, "prefix": PREFIX, "profile": profile}
 
 
-def page(path, status=200, role="admin", ui="new", console=()):
-    return {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+# #31: the design-reference scan r14/crawl.py puts on every page row below 400 (a clean page as main renders it)
+DESIGN_OK = {"texts": 120, "skipped": 0, "refs": [], "type": "text/html"}
+
+
+def page(path, status=200, role="admin", ui="new", console=(), design="clean"):
+    r = {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+    if status < 400 and design is not None:
+        r["design"] = dict(DESIGN_OK) if design == "clean" else design
+    return r
 
 
 def link(p, target, status, role="admin", ui="new", label="x", data=None):
@@ -369,6 +382,89 @@ def _monitor_def04(listed=True, **visit):
             "dialog": True, "after_cancel": "GlobalMatrixAuthorizationStrategy", "after_ok": "BatchControlMatrixAuthorizationStrategy",
             "install_gone": True, "restored": "BatchControlMatrixAuthorizationStrategy", "console": [],
             "r31": {"listed": listed}, "layout_global": dict(lay, **visit), "layout_bc": dict(lay, **visit, before_install=False)}
+
+
+# #31 (r6/s5c.py): reject_color.py D rows as main renders them. Light theme colours: the destructive red (the probe),
+# the text colour, the primary (accent) colour of a non-destructive dialog's OK button.
+# Values as Chromium reported them on main (2026-11-02): computed colours in oklch, canvas-normalised "r,g,b,a"; core
+# paints the button background on ::before.
+RED, TEXT, ACCENT = "oklch(0.6 0.2671 30)", "oklch(0.05 0.075 256.91)", "oklch(0.55 0.2 260)"
+WHITE, NONE, ITEM = "rgb(255, 255, 255)", "rgba(0, 0, 0, 0)", "oklch(0.97 0.005 256.91)"
+NORM = {RED: "248,0,0,255", TEXT: "0,8,35,255", ACCENT: "0,92,230,255", WHITE: "255,255,255,255", NONE: "0,0,0,0",
+        ITEM: "243,245,248,255"}
+
+
+def _btn(label, color, before, classes):
+    return {"label": label, "color": color, "bg": NONE, "before_bg": before, "classes": classes, "visible": True,
+            "n": {"color": NORM[color], "bg": NORM[NONE], "before_bg": NORM[before]}}
+
+
+def _destructive(where, control, **change):
+    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke"}[control]
+    r = {"where": where, "control": control, "user": "admin" if control == "Revoke" else "requester", "page": "/batch-control/x/",
+         "http": 200, "probe": RED, "around": TEXT, "count": 1,
+         "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
+                    "classes": "jenkins-button jenkins-!-destructive-color confirmation-link"},
+         "dialog": {"probe": RED, "probe_n": NORM[RED], "title": "Cancel this run request?", "text": "...",
+                    "buttons": ["Cancel", ok_text],
+                    "ok": _btn(ok_text, WHITE, RED, "jenkins-button jenkins-button--primary jenkins-!-destructive-color"),
+                    "cancel": _btn("Cancel", TEXT, ITEM, "jenkins-button")},
+         "closed_on_cancel": True, "url_after_cancel": "/batch-control/x/", "state_before": True, "state_after": True}
+    for k, v in change.items():
+        if isinstance(v, dict) and isinstance(r.get(k), dict):
+            r[k] = dict(r[k], **v)
+        else:
+            r[k] = v
+    return r
+
+
+def _destructive_rows(drop=None, **changes):
+    """All five D rows; `changes` maps a row's where (spaces as _) to its changes."""
+    return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
+
+
+# #31 (r8/rebuild.py): gate.py L's row as main renders it
+def _rebuild(**change):
+    r = {"user": "nobc", "job": "r19-gate", "build": 1, "approved_build": 1, "flag": "true", "overflow_button": 1,
+         "menu": [{"text": "Rebuild Last", "tag": "a", "href": "/jenkins/job/r19-gate/lastCompletedBuild/rebuild/parameterized"},
+                  {"text": "Rename", "tag": "a", "href": "/jenkins/job/r19-gate/confirm-rename"},
+                  {"text": "Permalinks", "tag": "button", "href": None}],
+         "menu_console": [], "entry_status": 200, "entry_url": "/job/r19-gate/lastCompletedBuild/rebuild/parameterized", "form": 1,
+         "submit_status": 400, "submit_url": "/job/r19-gate/lastCompletedBuild/rebuild/configSubmit",
+         "submit_text": "Approval required. This build was not started. Job r19-gate only runs through an approved Batch Control run request.",
+         "queue": [], "next_build_before": 2, "next_build": 2,
+         "records": [{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #1 by 'nobc' - "
+                      "a re-run does not reuse an earlier approval; submit a new run request"}], "flag_restored": "true"}
+    r.update(change)
+    return r
+
+
+# #31 (r9/s76.py): round3.py B rows. A designated approver sees decisions (WARNING), a requester their own pending
+# requests (INFO), an auditor no badge; the wording is not judged, only the tooltip and its number.
+def _badge(n, tip="", **kw):
+    return dict({"text": str(n), "visible": True, "cls": "jenkins-badge jenkins-!-warning-color", "tooltip": tip,
+                 "data_tooltip": None, "title": None}, **kw)
+
+
+def _tab(tab, *badges, others=()):
+    return {"tab": tab, "label": tab.title() + "".join(f" {b['text']}" for b in badges), "badges": list(badges),
+            "others": list(others)}
+
+
+def _badge_row(user, *tabs, status=200):
+    return {"user": user, "status": status, "tabs": [_tab("overview")] + list(tabs)}
+
+
+def _badge_rows(**change):
+    """One row per h1.BADGE_ROLES role; `change` maps a role (- as _) to its replacement row (None drops it)."""
+    rows = {u: _badge_row(u) for u in h1.BADGE_ROLES}
+    rows["approver-1"] = _badge_row("approver-1", _tab("requests", _badge(3, "3 run requests are awaiting your decision")),
+                                    _tab("activations"), _tab("grants", _badge(1, "1 grant request is awaiting your decision")))
+    rows["requester"] = _badge_row("requester", _tab("requests", _badge(12, "12 of your run requests are pending")),
+                                   _tab("grants"))
+    for k, v in change.items():
+        rows[k.replace("_", "-")] = v
+    return [r for r in rows.values() if r is not None]
 
 
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
@@ -637,6 +733,110 @@ def synthetic():
          crawl_ctx("requester"), "pass", None),
         ("allowed: Workspace 404 for admin, classic (C-04)", "crawl", [link(WS_PAGE, "/job/ops/job/job-a/ws/", 404, ui="classic", label="Workspace")],
          crawl_ctx(ui="classic"), "pass", None),
+        # #31 (r6/s5c.py): Cancel Request and Revoke are red and open red confirmation dialogs (reject_color.py D)
+        ("destructive: #31 every control red, every dialog's OK red, Cancel changes nothing", "destructive", _destructive_rows(),
+         {}, "pass", None),
+        ("destructive: #31 Cancel Request without the destructive class (text colour)", "destructive",
+         _destructive_rows(run_request={"button": {"color": TEXT, "classes": "jenkins-button confirmation-link"}}), {}, "fail",
+         "destructive-button"),
+        ("destructive: #31 the window page shows no Revoke", "destructive", _destructive_rows(window={"button": None, "count": 0,
+                                                                                                    "dialog": None}),
+         {}, "fail", "destructive-button"),
+        ("destructive: #31 Revoke's dialog not destructive (OK in the accent colour)", "destructive",
+         _destructive_rows(grants_list={"dialog": {"ok": _btn("Revoke", WHITE, ACCENT, "jenkins-button jenkins-button--primary")}}),
+         {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the OK button's red only matches after normalisation (rgb vs oklch)", "destructive",
+         _destructive_rows(window={"dialog": {"ok": dict(_btn("Revoke", WHITE, RED, "jenkins-button jenkins-button--primary"),
+                                                         before_bg="rgb(248, 0, 0)")}}), {}, "pass", None),
+        ("destructive: #31 the click opens no dialog", "destructive", _destructive_rows(activation_request={"dialog": None}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 the dialog's Cancel is red too", "destructive",
+         _destructive_rows(permission_window_request={"dialog": {"cancel": _btn("Cancel", RED, ITEM, "jenkins-button")}}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 Cancel in the dialog cancelled the request", "destructive",
+         _destructive_rows(run_request={"state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the window never conferred (no premise for 'nothing changed')", "destructive",
+         _destructive_rows(window={"state_before": False, "state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the probe does not resolve (same colour as the text)", "destructive",
+         _destructive_rows(run_request={"probe": TEXT, "button": {"color": TEXT}}), {}, "fail", "destructive-measured"),
+        ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
+         "destructive-measured"),
+        ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
+        # #31 (r8/rebuild.py): Rebuild Last from the new job page's More actions (gate.py L)
+        ("rebuild-menu: #31 offered with its URL, refused, nothing queued, recorded", "rebuild-menu", [_rebuild()], {}, "pass", None),
+        ("rebuild-menu: #31 DEF-06: the menu stays empty", "rebuild-menu",
+         [_rebuild(menu=[], menu_console=["pageerror: Cannot read properties of null (reading 'startsWith')"], entry_status=None,
+                   entry_url=None, form=None, submit_status=None, submit_text=None, records=[])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 DEF-06: Rebuild Last with a null URL", "rebuild-menu",
+         [_rebuild(menu=[{"text": "Rebuild Last", "tag": "a", "href": None}])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the entry does not open the rebuild form", "rebuild-menu",
+         [_rebuild(entry_status=404, form=0)], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 no row (the section did not run)", "rebuild-menu", [], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the rebuild was accepted and queued", "rebuild-menu",
+         [_rebuild(submit_status=200, submit_text="r19-gate #2", queue=[{"id": 7}], next_build=3, records=[])], {}, "fail",
+         "rebuild-menu-refused"),
+        ("rebuild-menu: #31 refused but not recorded", "rebuild-menu", [_rebuild(records=[])], {}, "fail", "rebuild-menu-refused"),
+        ("rebuild-menu: #31 recorded for another build", "rebuild-menu",
+         [_rebuild(records=[{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #7 by 'nobc'"}])],
+         {}, "fail", "rebuild-menu-refused"),
+        # #31 (r9/s76.py): the tab badges carry a tooltip with their number (round3.py B)
+        ("badges: #31 every badge has a tooltip with its number, no badge no tooltip", "badges", _badge_rows(), {}, "pass", None),
+        ("badges: #31 the tooltip only as title (core's tooltip script)", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None, title="2 waiting for you")))), {},
+         "pass", None),
+        ("badges: #31 a badge without a tooltip", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None)))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 an empty tooltip", "badges",
+         _badge_rows(requester=_badge_row("requester", _tab("requests", _badge(4, "  ")))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 a tooltip with another number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "4 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 '3' inside '13' is not the badge's number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "13 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 a badge element without a number", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge("", "grant requests are pending")))), {}, "fail",
+         "badge-tooltip"),
+        ("badges: #31 a hidden badge", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge(2, "2 grant requests are pending", visible=False)))), {},
+         "fail", "badge-tooltip"),
+        ("badges: #31 a tab without a badge announces a count in a tooltip", "badges",
+         _badge_rows(auditor=_badge_row("auditor", _tab("requests", others=[{"tag": "span", "tooltip": "2 run requests are pending",
+                                                                             "data_tooltip": None, "title": None}]))), {},
+         "fail", "badge-tooltip-absent"),
+        ("badges: #31 the approver-unlisted row is missing", "badges", _badge_rows(approver_unlisted=None), {}, "fail",
+         "badge-tooltip-measured"),
+        ("badges: #31 auditor's overview not measured (403, no tabs)", "badges",
+         _badge_rows(auditor={"user": "auditor", "status": 403, "tabs": None}), {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no role shows a badge (the check would pass on nothing)", "badges",
+         [_badge_row(u) for u in h1.BADGE_ROLES], {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no row at all", "badges", [], {}, "fail", "badge-tooltip-measured"),
+        # #31 (r6/s6.py): internal design references on a page a user sees
+        ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
+         [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 'SPEC item' in a tooltip behind Advanced", "crawl",
+         [{"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded",
+           "design": {"texts": 90, "skipped": 0, "refs": [{"match": "SPEC item", "text": "see SPEC item 2", "el": "a@title"}]}}],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 driver-typed text with a D-number is skipped, nothing else found", "crawl",
+         [page(req, design={"texts": 80, "skipped": 1, "refs": []})], crawl_ctx(), "pass", None),
+        ("crawl: #31 a page below 400 without the scan (the driver stopped measuring)", "crawl",
+         [page(req, design=None)], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a scan that read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": []})], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 an HTML page whose scan read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": [], "type": "text/html"})], crawl_ctx(), "fail",
+         "design-ref-measured"),
+        ("crawl: #31 a JSON document (shown in a <pre>) needs no scanned text", "crawl",
+         [page("/batch-control/history/summary", design={"texts": 0, "skipped": 0, "refs": [], "type": "application/json"})],
+         crawl_ctx(), "pass", None),
+        ("crawl: #31 an Advanced row without the scan", "crawl",
+         [page("/manage/batch-control-configuration/"),
+          {"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded"}],
+         crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a 403 page is not scanned and needs no scan", "crawl",
+         [page("/batch-control/dashboard/", 403, role="requester", design=None)], crawl_ctx("requester"), "pass", None),
         ("allowed: the header.js page error by its stack (U-1)", "crawl", [page(req, console=[U1_ENTRY])], crawl_ctx(), "pass", None),
         ("allowed: D-70 by its exact message", "crawl", [page("/job/batch-daily/", console=[D70_LINE])], crawl_ctx(), "pass", None),
         ("allowed: warnings are never judged", "crawl", [page(req, console=["warning: .behavior-loading is deprecated"])], crawl_ctx(), "pass", None),

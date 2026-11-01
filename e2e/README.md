@@ -105,7 +105,14 @@ regex, exact status or whole normalised message, a page error's leading stack fr
 class and source). Warnings are never judged. An allowlist entry that applied and matched nothing prints
 `STALE allow <id>`, a warning that `summary.md` lists. `python3 e2e/ci/selftest_h1.py` replays recorded rows and
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
-counts the notable rows of crawl, actions and jobui.
+counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
+made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
+references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`destructive`), `r19/gate.py` L
+(`rebuild-menu`) and `r14/round3.py` B (`badges`: on `/batch-control/` as admin, requester, approver-1, manager,
+reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carries a non-empty tooltip, core's
+`l:badge` `tooltip` attribute, that contains its number, and a tab without a badge carries none; the wording is not
+judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), next to #129's `helpcheck.py` layout and
+`s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -280,6 +287,15 @@ filesystem path in the visible text (`/var/`, `/tmp/`, `/home/`, `jenkins_home`,
 `FOLDER_ONLY:`). Text in `pre`, `code` and `textarea` is not checked. Empty cells in optional columns (Decided,
 Aborted by, Comment, Parameters, ...) are logged once per pattern as `empty-optional` rows without a verdict.
 
+Design references (#31, the check of the retired `r6/s6.py`): the same `CONTENT_JS` scans the whole body of each page
+(shown or hidden text, `<template>` contents and the `title`, `tooltip`, `aria-label` and `placeholder` attributes; never
+`pre`, `code` or `textarea`) for an internal design reference: `SPEC item`, `SPEC section`, `D-<nn>`, `DECISIONS.md`,
+`TEST-MATRIX`. The page row (and the row of an Advanced expansion) carries the scan as `design` (`texts`, `skipped`,
+`refs`), and `ci/h1_rules.py` judges it: each reference is a `FAIL crawl design-ref`, and a page below 400 without the
+scan or with no text scanned a `FAIL crawl design-ref-measured` (the measurement is required). Text an e2e driver typed
+(it contains `e2e-<digit>`, as the reason `e2e-17 D-75 (1): ...` of `r17/s39.py`) is user data: counted as `skipped`,
+not judged.
+
 Raw enum values (e2e-16): an UPPER_SNAKE_CASE constant (`GRANT_REVOKE`, `APPROVED_REQUEST`, ...), the scope prefix
 `ITEM:` and the state and action words of the plugin's vocabulary (`PENDING`, `APPROVED`, ..., `CONFIGURE`, `CREATE`,
 `DELETE`) shown as text are logged once per URL pattern and value as `raw-enum` rows with result INFO, without a
@@ -292,8 +308,11 @@ look-alikes that must stay silent (a path in `<pre>`, a URL path, empty optional
 probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings and raw-enum
 rows (2026-10-06: 9 defect findings and the raw-enum values `FOLDER_ONLY`, `GRANT_REVOKE`, `ITEM:`, `PENDING` on the
 first page; no defect and only `JOB_NAME` on the second, where `GRANT_REVOKE` and `ITEM:` inside `<code>` and title-case
-words must stay silent; the same on 2026-10-06 for e2e-17). Run it after editing the checks; `.github/workflows/e2e.yml`
-runs it in the `coverage` job (22ed006).
+words must stay silent; the same on 2026-10-06 for e2e-17). Since #31 it also compares the design-reference scan that
+`content_checks()` returns: `D-61`, `SPEC item` (a `title`), `D-59a` (hidden text) and `DECISIONS.md` (a `<template>`)
+on the first page; none on the second, where `D-61` in `<code>`, `SPEC item` in `<pre>`, `D-59` in a `<textarea>`,
+`ID-12`, `D-1`, lower case and a driver-typed reason (`e2e-17 D-75 ...`, one skipped text) must stay silent. Run it after
+editing the checks; `.github/workflows/e2e.yml` runs it in the `coverage` job (22ed006).
 
 ### Fixture preconditions
 
@@ -694,8 +713,20 @@ page in its own context, and the browser's computed styles are compared: the Rej
 a probe inserted next to it with `style="color: var(--destructive-color)"` (the theme's red, not a hard-coded RGB). The
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
 button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
-the three requests. Light theme only. Alone:
-`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of it the shared setup).
+the three requests. Light theme only.
+
+Section `D` (#31, the check of the retired `r6/s5c.py`; the CI step runs `reject_color.py RGAD`): the requester opens
+the three pending requests and measures "Cancel Request"; admin opens the grants list and the detail page of a window
+the requester holds (CONFIGURE on `r21-reject`, approved over REST for D and revoked in the clean-up) and measures
+"Revoke". Each control (core's `l:confirmationLink`, found by its `data-url`) is compared with the same probe, then
+clicked: core's confirmation dialog must open, its OK button must be red (its computed colour, background or `::before`
+background, where core paints a button's background, equal to a probe inside the dialog, also compared after a canvas
+normalisation so `oklch(...)` and `rgb(...)` match: core's destructive dialog type) and its Cancel button not, and Cancel
+must close it and change nothing (the request still pending, the window still conferring Configure). The rows are judged by `ci/h1_rules.py`
+(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the five
+controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
+`-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
+it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 
@@ -743,12 +774,17 @@ adds the CLI (inside the Jenkins container), the mailpit sink (`BC_MAIL_PORT`), 
 starts with the D-31/D-34 lock and not activated), a username/password credential `r19-cred-id`, the lockable resource
 `r19-res`, a multi-configuration project `r19-mx` and an organization folder `r19-org`. Accounts are JCasC's.
 
-- `gate.py [BPARXM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
+- `gate.py [BCPARXLM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
   may request); REST `build`/`buildWithParameters`, the CLI `build`, the build token on core's endpoint and on
   build-token-root, a Pipeline Replay and the rebuild plugin's Rebuild are refused, nothing is queued, the refusals are
   recorded; an approved request runs exactly once with exactly its values, the build page names request, requester and
   approver, the request links the build; a consumed approval marker presented again is MARKER_REUSE_BLOCKED (Changes,
-  `changes.csv`).
+  `changes.csv`). Section L (#31, the check of the retired `r8/rebuild.py`; e2e-07 DEF-06): `nobc` (another user than
+  X's requester, so its attempt on the same build is not merged into X's record, D-51) opens the new job page's "More
+  actions" menu of `r19-gate`: it must list "Rebuild Last" with the rebuild URL of the last completed build (DEF-06: a
+  null URL left the whole menu empty), the entry must open the rebuild form, and its submission must be refused (4xx,
+  the approval message) with nothing queued and a TRIGGER_BLOCKED record naming `nobc` and the build. Judged by
+  `ci/h1_rules.py` (driver `rebuild-menu`: `rebuild-menu-offered`, `rebuild-menu-refused`; a missing row fails).
 - `plugins.py [NCLZHI]` (unit `r19-plugins`): naginator's retry of an approved run refused and recorded;
   customize-build-now keeps Request Run; lockable-resources and authorize-project ("Run as Specific User" admin; the
   project default authenticator is added and removed again) with an approved run; jobConfigHistory and the CLI

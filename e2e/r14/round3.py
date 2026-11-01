@@ -5,7 +5,9 @@ A one-item window on a folder (D-71, replaces the D-65 folder-only check): folde
   type selector, the folder's kind shown), Delete on the folder refused next to the field, Create+Configure approved
   in the browser; then the window configures ops only (not ops/a, ops/sub, ops/mb), creates directly in ops only,
   deletes nothing (a job's own Delete window does), and a browser save/refusal
-B overview badges only (R4-6/D-67): no table/alert, badge counts equal the list rows
+B overview badges only (R4-6/D-67): no table/alert, badge counts equal the list rows; #31 (r9/s76.py): every shown tab
+  badge carries a tooltip naming its number, a tab without a badge none (admin, requester, approver-1, manager,
+  reqonly, approver-2, approver-unlisted, auditor; ci/h1_rules.py "badges")
 C tab look (R4-7): our tab bar vs core's new build page tabs
 D model-link (R4-11): dashboard, request detail, activation list/detail; chevron opens core's menu
 E dashboard 50 + History links (R4-13)
@@ -277,6 +279,11 @@ def pending_rows(s, section):
     return t.locator("tbody tr").count() if t.count() else 0
 
 
+# the roles whose badge counts R4-6/D-67 compares with the store (badge_oracle); the tooltip check (#31) covers every
+# role of ci/h1_rules.py BADGE_ROLES
+COUNT_ROLES = ("admin", "requester", "approver-1", "manager", "reqonly")
+
+
 def badge_oracle(user, kind):
     """D-61: pending requests awaiting the viewer's decision (designated approver), else the viewer's own pending
     requests; read from the store files (requests/run, requests/grant, activation-requests)."""
@@ -294,10 +301,36 @@ return appr + ',' + own""" % (d, user, user)).replace("Result: ", "")
     return appr if appr else (own or None)
 
 
+# #31 (the retired r9/s76.py): what each tab's badge carries besides its number. core's l:badge renders
+# <span class="jenkins-badge ..." tooltip="..."> (core's tooltip script may add a title); every tooltip-like attribute
+# below a tab is read, so a tooltip without a shown badge is seen as well. Judged by ci/h1_rules.py ("badges").
+BADGE_JS = """() => [...document.querySelectorAll('nav[data-batch-control-tabs] a[data-batch-control-tab]')].map(a => {
+  const shown = e => !!(e.offsetWidth || e.offsetHeight);
+  const tip = e => ({tooltip: e.getAttribute('tooltip'), data_tooltip: e.getAttribute('data-tooltip'), title: e.getAttribute('title')});
+  const badges = [...a.querySelectorAll('.jenkins-badge')].map(b => Object.assign({text: b.textContent.trim(), visible: shown(b),
+    cls: b.className}, tip(b)));
+  const others = [...a.querySelectorAll('[tooltip], [data-tooltip], [title]')].filter(e => !e.classList.contains('jenkins-badge'))
+    .map(e => Object.assign({tag: e.tagName.toLowerCase()}, tip(e)));
+  return {tab: a.getAttribute('data-batch-control-tab'), label: a.innerText.replace(/\\s+/g, ' ').trim(), badges: badges, others: others};
+})"""
+
+
 def sec_B():
-    for user in ("admin", "requester", "approver-1", "manager", "reqonly"):
+    rows = []
+    for user in lib.h1.BADGE_ROLES:
         s = Session(user)
-        s.go("/batch-control/")
+        resp = s.go("/batch-control/")
+        row = {"user": user, "status": resp.status if resp else None}
+        try:
+            row["tabs"] = s.page.evaluate(BADGE_JS)
+        except Exception as e:  # noqa: recorded; a row without tabs fails badge-tooltip-measured
+            row["tabs"], row["error"] = None, str(e)[:200]
+        rows.append(row)
+        lib.log("round3", dict(row, sec="B", what="badge tooltips"))
+        if user not in COUNT_ROLES:  # approver-2, approver-unlisted, auditor: the tooltip measurement only (#31)
+            s.shot("nav[data-batch-control-tabs]", f"R3-B-{user}-tabs")
+            s.done()
+            continue
         tabs = badge_counts(s)
         ov = {"tables": s.page.locator("#main-panel table").count(),
               "alerts": s.page.locator("#main-panel .jenkins-alert, #main-panel .alert, #main-panel .jenkins-notice").count(),
@@ -311,6 +344,7 @@ def sec_B():
               and all(a == b for a, b in cmp.values()), tabs=tabs, badge_vs_expected=cmp, **ov)
         console_ok("B", s, f"{user} overview + lists")
         s.done()
+    lib.h1.report("badges", rows)
 
 
 # ---------------------------------------------------------------- C
