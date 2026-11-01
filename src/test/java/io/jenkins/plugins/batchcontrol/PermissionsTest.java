@@ -4,13 +4,19 @@ import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.security.Permission;
 import hudson.security.PermissionGroup;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.DomNode;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
@@ -94,6 +100,77 @@ public class PermissionsTest {
         // present in the DOM but invisible to HtmlUnit's normalized (visible-only) text. Assert on
         // the raw DOM instead; visible-text verification is covered by the Phase 5 e2e visual check.
         assertTrue(page.getWebResponse().getContentAsString().contains("Batch Control"), "the security configuration screen must expose the Batch Control permission group in its DOM");
+    }
+
+    /**
+     * T-02-197 (SPEC 2 "the five permissions are exposed as a Batch Control group in the matrix
+     * authorization screen"; #31, e2e script rest-admin-screens.sh): under the Batch Control matrix
+     * strategy the administrator opens {@code manage/configureSecurity/}. Every permission group whose
+     * title reads exactly "Batch Control" holds exactly the five Batch Control permissions, by their
+     * permission ids. Guards: the "Overall" group holds Overall/Administer and none of the five, so the
+     * group boundaries read here are real. Unlike T-02-02's raw-DOM check, a stray "Batch Control"
+     * elsewhere on the page (a strategy name, a heading) cannot satisfy this row.
+     */
+    @Test
+    public void t_02_197_securityPageGroupsTheFivePermissionsUnderBatchControl() throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        strategy.add(Jenkins.READ, PermissionEntry.user("u1"));
+        strategy.add(BatchControlPermissions.REQUEST, PermissionEntry.user("u1"));
+        j.jenkins.setAuthorizationStrategy(strategy);
+
+        Set<String> five = new TreeSet<>(List.of(
+                BatchControlPermissions.REQUEST.getId(),
+                BatchControlPermissions.APPROVE.getId(),
+                BatchControlPermissions.REQUEST_GRANT.getId(),
+                BatchControlPermissions.VIEW_HISTORY.getId(),
+                BatchControlPermissions.MANAGE.getId()));
+        assertEquals(5, five.size(), "premise: five distinct permission ids");
+
+        HtmlPage page = j.createWebClient().login("admin").goTo("manage/configureSecurity/");
+        List<DomElement> groups = permissionGroupsTitled(page, "Batch Control");
+        assertFalse(groups.isEmpty(), "the security page must render a permission group titled 'Batch Control'");
+        for (DomElement group : groups) {
+            assertEquals(five, permissionIds(group), "the 'Batch Control' group must hold exactly the five Batch Control permissions");
+        }
+
+        List<DomElement> overall = permissionGroupsTitled(page, "Overall");
+        assertFalse(overall.isEmpty(), "guard: the security page renders the 'Overall' permission group the same way");
+        for (DomElement group : overall) {
+            Set<String> ids = permissionIds(group);
+            assertTrue(ids.contains(Jenkins.ADMINISTER.getId()), "guard: the 'Overall' group holds Overall/Administer: " + ids);
+            for (String id : five) {
+                assertFalse(ids.contains(id), "guard: the 'Overall' group must not hold " + id + ": " + ids);
+            }
+        }
+    }
+
+    /**
+     * The permission groups on {@code page} whose title (a legend, matrix-auth 3.x) reads exactly
+     * {@code title}: each title's nearest ancestor that also contains permission cells.
+     */
+    private static List<DomElement> permissionGroupsTitled(HtmlPage page, String title) {
+        List<DomElement> out = new ArrayList<>();
+        for (Object o : page.getByXPath("//legend[normalize-space(.)='" + title + "']")) {
+            DomNode n = ((DomNode) o).getParentNode();
+            while (n instanceof DomElement && permissionIds((DomElement) n).isEmpty()) {
+                n = n.getParentNode();
+            }
+            if (n instanceof DomElement) {
+                out.add((DomElement) n);
+            }
+        }
+        return out;
+    }
+
+    /** The permission ids of the permission cells inside {@code container}. */
+    private static Set<String> permissionIds(DomElement container) {
+        Set<String> ids = new TreeSet<>();
+        for (DomNode n : container.querySelectorAll("[data-permission-id]")) {
+            ids.add(((DomElement) n).getAttribute("data-permission-id"));
+        }
+        return ids;
     }
 
     /** T-02-05: a Manage holder can POST the global config form; values are saved (form round-trip keeps them). */
