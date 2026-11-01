@@ -339,8 +339,9 @@ public class StrategyMonitorGapTest {
     }
 
     /**
-     * T-02-195 (e2e-09 DEF-03, verified in e2e-10 item 3, note 366): the page shown after "Mark as
-     * reviewed" ({@code batch-control/reviewed?item=done-2}) has the breadcrumb "Batch Control ›
+     * T-02-195 (e2e-09 DEF-03, verified in e2e-10 item 3, note 366): "Mark as reviewed" redirects the
+     * browser to {@code <root>/batch-control/reviewed?item=done-2} (the Location of the POST's answer,
+     * not the monitor's own URL), and the page landed on (the redirect followed) has the breadcrumb "Batch Control ›
      * Marked as reviewed" and the title "Marked as reviewed": its last breadcrumb reads "Marked as
      * reviewed", the one before it "Batch Control", and no breadcrumb names the strategy monitor
      * ("authorization strategy", "grants need"). Premise: the page confirms the review (T-GAP-247).
@@ -350,11 +351,23 @@ public class StrategyMonitorGapTest {
         installMatrix();
         listedJob("done-2");
         revokeAsM1(windowOn("done-2"));
-        assertTrue(post("admin", "markReviewed", "item=done-2", null).getStatusCode() < 400, "fixture: review of done-2");
+        WebResponse review = post("admin", "markReviewed", "item=done-2", null);
+        assertTrue(review.getStatusCode() >= 300 && review.getStatusCode() < 400, "Mark as reviewed must send the browser on to"
+                + " the confirmation page (a redirect), got HTTP " + review.getStatusCode());
+        String header = review.getResponseHeaderValue("Location");
+        assertNotNull(header, "the redirect must carry a Location");
+        URL landing = new URL(review.getWebRequest().getUrl(), header);
+        String expectedPath = new URL(j.getURL(), "batch-control/reviewed").getPath();
+        assertEquals(expectedPath, landing.getPath().replaceAll("/$", ""), "Mark as reviewed must land on batch-control/reviewed"
+                + " (not on the monitor's URL), was " + landing);
+        String query = landing.getQuery() == null ? "" : landing.getQuery();
+        assertTrue(Arrays.stream(query.split("&")).anyMatch(kv -> kv.startsWith("item=")
+                        && "done-2".equals(java.net.URLDecoder.decode(kv.substring(5), StandardCharsets.UTF_8))),
+                "the landing URL must name item=done-2, was " + landing);
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
         wc.getOptions().setJavaScriptEnabled(false);
-        HtmlPage page = wc.goTo("batch-control/reviewed?item=done-2");
-        assertEquals(200, page.getWebResponse().getStatusCode(), "premise: the reviewed page renders");
+        HtmlPage page = wc.getPage(landing);
+        assertEquals(200, page.getWebResponse().getStatusCode(), "premise: the page landed on renders");
         assertTrue(CONFIRMATION.matcher(page.asNormalizedText()).find(), "premise: the page confirms the review: "
                 + UsabilityFixtures.excerpt(page.asNormalizedText()));
         List<String> crumbs = new ArrayList<>();
