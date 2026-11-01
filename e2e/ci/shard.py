@@ -281,9 +281,13 @@ UNITS = [
     Unit("r19-triggers", 6.0, [("r19-arrange", py("r19/arrange.py")), ("r19-triggers", py("r19/triggers.py"))],
          doc="e2e-19: a real cron schedule (blockTimer, TRIGGER_BLOCKED coalescing, activation, hold) and a real "
              "parameterized-trigger upstream (blockUpstream, allow list) (SPEC 6, 6a)"),
-    Unit("r19-lifecycle", 2.5, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
+    # Section M (gap M11, 2026-10-31: the EXPIRING, INVALIDATED and run APPROVED mails) waits for two passes of the
+    # plugin's one-minute periodic work: 97 s on a fresh stack through ci/run.sh (local, 2026-11-01; lifecycle step 213 s
+    # with M), real time that does not shrink on the runner, so the weight went from 2.5 to 4.1.
+    Unit("r19-lifecycle", 4.1, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
          doc="e2e-19: request form validation, decision and cancel rules, approver change, self-approval, approved-run "
-             "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12)"),
+             "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12); the "
+             "EXPIRING reminder exactly once, INVALIDATED and run APPROVED mails (SPEC 13, gap M11)"),
     # e2e-22 R2-05 (bug-hunt batch B). r22/cancelled_notice.py arranges its own items (r22-cancelq, r22-cancelq-dis).
     Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
          doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "

@@ -10,6 +10,7 @@ C tab look (R4-7): our tab bar vs core's new build page tabs
 D model-link (R4-11): dashboard, request detail, activation list/detail; chevron opens core's menu
 E dashboard 50 + History links (R4-13)
 F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; footers; no horizontal scroll at 1280
+  M5 (#101, #103): every listed id carries the full id as tooltip and text, no title, cut by CSS; a hover shows it
 G revoke on the window's detail page (R4-12): holder sees no Revoke, manager revokes, holder loses access
 H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
@@ -437,7 +438,52 @@ def layout(s):
     return lay
 
 
+# M5 (gap audit 2026-10; #101, #103): every id the lists show (tags/idLink.jelly: [data-batch-control-id]) carries the
+# full id as core's tooltip attribute and holds the full id as its text, is served without a native title (core's
+# tooltip script itself sets title = tooltip on the element it registers and removes it while its tooltip shows, so the
+# rendered DOM is judged by that: core registered it (element._tippy) and any title equals the id), and is cut by CSS:
+# computed text-overflow ellipsis with overflow hidden, and a rendered box narrower than the full text (clientWidth below
+# scrollWidth). Read once per list page, after load (the ids are server-rendered, not transient).
+SHORT_IDS = """() => [...document.querySelectorAll('#main-panel [data-batch-control-id]')].map(e => {
+  const cs = getComputedStyle(e); const id = e.getAttribute('data-batch-control-id');
+  return {id, tag: e.tagName.toLowerCase(), tooltip: e.getAttribute('tooltip'), title: e.getAttribute('title'), core: !!e._tippy,
+    text: (e.textContent || '').trim(), overflow: cs.textOverflow, hidden: cs.overflowX, rendered: e.getClientRects().length > 0,
+    width: e.clientWidth, full: e.scrollWidth}; })"""
+SERVED_ID_TAG = re.compile(r"<(?:a|span)\b[^>]*\bdata-batch-control-id=[^>]*>")
+
+
+def short_ids_bad(ids, html):
+    """The ids that break #101/#103 (empty list: all hold): in the DOM, and in the served page (`html`)."""
+    bad = [i for i in ids if not (re.fullmatch(UUID, i["id"] or "") and i["tooltip"] == i["id"] and i["core"]
+                                  and i["title"] in (None, i["id"]) and i["text"] == i["id"] and i["overflow"] == "ellipsis"
+                                  and i["hidden"] == "hidden" and i["rendered"] and 0 < i["width"] < i["full"])]
+    served = SERVED_ID_TAG.findall(html or "")
+    bad += [{"served": t[:200]} for t in served if re.search(r"\stitle=", t)]
+    if len(served) != len(ids):
+        bad.append({"served_tags": len(served), "dom": len(ids)})
+    return bad
+
+
+def tooltip_on_hover(s, el_id):
+    """#101: hovering the id shows core's tooltip (tippy, attached by core's JavaScript from the tooltip attribute)
+    with the full id, and no native title meanwhile (core removes it while its tooltip shows). Returns (the texts of
+    the tooltip boxes, the element's title while hovered); waits up to 5 s for a box with the id."""
+    el = s.page.locator(f"#main-panel [data-batch-control-id='{el_id}']").first
+    el.scroll_into_view_if_needed()
+    el.hover()
+    box = s.page.locator(".tippy-box", has_text=el_id)
+    try:
+        box.first.wait_for(state="visible", timeout=5000)
+    except Exception:  # noqa: judged by the caller (no box with the id)
+        pass
+    texts = [t.strip() for t in s.page.locator(".tippy-box").all_inner_texts()]
+    title = el.get_attribute("title")
+    s.page.mouse.move(0, 0)
+    return texts, title
+
+
 def sec_F():
+    hovered = set()
     for user in ("admin", "approver-1", "requester", "fonly"):
         s = Session(user)
         for sec in ("requests", "activations", "grants"):
@@ -459,6 +505,20 @@ def sec_F():
             check("F", f"{user} {sec}: H2 Pending -> Active -> Ended, no form above, ID links to UUID detail, no h-scroll at 1280",
                   len(order_ok) >= 3 and order_ok[0] == "Pending Requests" and order_ok[-1] == "Ended" and lay["formsBefore"] == 0
                   and ids_ok and lists_ok and no_hscroll(lay), lists=lists, **lay)
+            ids = s.page.evaluate(SHORT_IDS)
+            bad = short_ids_bad(ids, r.text())
+            listed = sum(t["rows"] for t in lay["tables"])
+            check("F", f"{user} {sec}: M5 (#101, #103) every listed id has the full id as its tooltip attribute (registered "
+                  "by core's tooltip script) and text, is served without a title, and is cut by CSS (text-overflow "
+                  "ellipsis, overflow hidden, rendered narrower than its text)",
+                  ids and not bad and len(ids) >= listed, ids=len(ids), rows=listed, bad=bad[:3],
+                  sample=ids[0] if ids else None)
+            if ids and sec not in hovered:  # one hover per list kind (the tooltip is core's, attached the same everywhere)
+                hovered.add(sec)
+                texts, title = tooltip_on_hover(s, ids[0]["id"])
+                check("F", f"{user} {sec}: M5 (#101) hovering an id shows core's tooltip (.tippy-box) with the full id and "
+                      "no native title meanwhile", ids[0]["id"] in texts and title is None, id=ids[0]["id"], tippy=texts[:3],
+                      title_while_shown=title)
         console_ok("F", s, f"{user} lists", expected=(("403 GET " + BASE + "/batch-control/requests/"),) if user == "fonly" else ())
         s.done()
 
