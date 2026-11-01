@@ -107,8 +107,12 @@ class and source). Warnings are never judged. An allowlist entry that applied an
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
 counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
 made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
-references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`destructive`) and `r19/gate.py` L
-(`rebuild-menu`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`destructive`), `r19/gate.py` L
+(`rebuild-menu`) and `r14/round3.py` B (`badges`: on `/batch-control/` as admin, requester, approver-1, manager,
+reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carries a non-empty tooltip, core's
+`l:badge` `tooltip` attribute, that contains its number, and a tab without a badge carries none; the wording is not
+judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), next to #129's `helpcheck.py` layout and
+`s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no

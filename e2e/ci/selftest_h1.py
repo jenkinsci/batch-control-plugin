@@ -439,6 +439,34 @@ def _rebuild(**change):
     return r
 
 
+# #31 (r9/s76.py): round3.py B rows. A designated approver sees decisions (WARNING), a requester their own pending
+# requests (INFO), an auditor no badge; the wording is not judged, only the tooltip and its number.
+def _badge(n, tip="", **kw):
+    return dict({"text": str(n), "visible": True, "cls": "jenkins-badge jenkins-!-warning-color", "tooltip": tip,
+                 "data_tooltip": None, "title": None}, **kw)
+
+
+def _tab(tab, *badges, others=()):
+    return {"tab": tab, "label": tab.title() + "".join(f" {b['text']}" for b in badges), "badges": list(badges),
+            "others": list(others)}
+
+
+def _badge_row(user, *tabs, status=200):
+    return {"user": user, "status": status, "tabs": [_tab("overview")] + list(tabs)}
+
+
+def _badge_rows(**change):
+    """One row per h1.BADGE_ROLES role; `change` maps a role (- as _) to its replacement row (None drops it)."""
+    rows = {u: _badge_row(u) for u in h1.BADGE_ROLES}
+    rows["approver-1"] = _badge_row("approver-1", _tab("requests", _badge(3, "3 run requests are awaiting your decision")),
+                                    _tab("activations"), _tab("grants", _badge(1, "1 grant request is awaiting your decision")))
+    rows["requester"] = _badge_row("requester", _tab("requests", _badge(12, "12 of your run requests are pending")),
+                                   _tab("grants"))
+    for k, v in change.items():
+        rows[k.replace("_", "-")] = v
+    return [r for r in rows.values() if r is not None]
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -751,6 +779,38 @@ def synthetic():
         ("rebuild-menu: #31 recorded for another build", "rebuild-menu",
          [_rebuild(records=[{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #7 by 'nobc'"}])],
          {}, "fail", "rebuild-menu-refused"),
+        # #31 (r9/s76.py): the tab badges carry a tooltip with their number (round3.py B)
+        ("badges: #31 every badge has a tooltip with its number, no badge no tooltip", "badges", _badge_rows(), {}, "pass", None),
+        ("badges: #31 the tooltip only as title (core's tooltip script)", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None, title="2 waiting for you")))), {},
+         "pass", None),
+        ("badges: #31 a badge without a tooltip", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None)))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 an empty tooltip", "badges",
+         _badge_rows(requester=_badge_row("requester", _tab("requests", _badge(4, "  ")))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 a tooltip with another number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "4 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 '3' inside '13' is not the badge's number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "13 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 a badge element without a number", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge("", "grant requests are pending")))), {}, "fail",
+         "badge-tooltip"),
+        ("badges: #31 a hidden badge", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge(2, "2 grant requests are pending", visible=False)))), {},
+         "fail", "badge-tooltip"),
+        ("badges: #31 a tab without a badge announces a count in a tooltip", "badges",
+         _badge_rows(auditor=_badge_row("auditor", _tab("requests", others=[{"tag": "span", "tooltip": "2 run requests are pending",
+                                                                             "data_tooltip": None, "title": None}]))), {},
+         "fail", "badge-tooltip-absent"),
+        ("badges: #31 the approver-unlisted row is missing", "badges", _badge_rows(approver_unlisted=None), {}, "fail",
+         "badge-tooltip-measured"),
+        ("badges: #31 auditor's overview not measured (403, no tabs)", "badges",
+         _badge_rows(auditor={"user": "auditor", "status": 403, "tabs": None}), {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no role shows a badge (the check would pass on nothing)", "badges",
+         [_badge_row(u) for u in h1.BADGE_ROLES], {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no row at all", "badges", [], {}, "fail", "badge-tooltip-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],

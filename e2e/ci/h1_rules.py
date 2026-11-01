@@ -1212,6 +1212,60 @@ def judge_rebuild_menu(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py B (#31, r9/s76.py)
+# The roles whose tab badges round3.py B measures on /batch-control/ (r9/s76.py's roles; each exists in casc/jenkins.yaml).
+BADGE_ROLES = ("admin", "requester", "approver-1", "manager", "reqonly", "approver-2", "approver-unlisted", "auditor")
+
+
+def _tip(e):
+    """The tooltip text of an element: core's l:badge writes `tooltip`; data-tooltip and title are read as well."""
+    return next((v.strip() for v in (e.get("tooltip"), e.get("data_tooltip"), e.get("title")) if v and v.strip()), "")
+
+
+def judge_badges(rows, ctx=None):
+    """#31 (the retired r9/s76.py): the Batch Control tab badges explain themselves. SPEC and TEST-MATRIX do not fix
+    the tooltip's wording, so only its presence and its number are judged (round3.py B, one row per BADGE_ROLES role):
+      * badge-tooltip: every badge below a tab is shown, its text is a number, and it carries a non-empty tooltip that
+        contains that number as a whole number ("3" does not match "13");
+      * badge-tooltip-absent: a tab that shows no badge has no tooltip-like attribute below it either (a count
+        announced without a badge);
+      * badge-tooltip-measured: each BADGE_ROLES role has a row whose overview answered 200 with its tabs measured,
+        and at least one role shows a badge (otherwise the two rules above pass on nothing)."""
+    j = Judge("badges", ctx)
+    by_user = {r.get("user"): r for r in rows}
+    shown = 0
+    for user in BADGE_ROLES:
+        r = by_user.get(user)
+        if r is None:
+            j.fail("badge-tooltip-measured", {"user": user, "row": "missing"})
+            continue
+        tabs = r.get("tabs")
+        if r.get("status") != 200 or not isinstance(tabs, list) or not tabs:
+            j.fail("badge-tooltip-measured", {"user": user, "status": r.get("status"), "tabs": None if tabs is None else len(tabs)},
+                   {"error": r.get("error")})
+            continue
+        for t in tabs:
+            key = {"user": user, "tab": t.get("tab")}
+            badges = t.get("badges") or []
+            for b in badges:
+                text, tip = (b.get("text") or "").strip(), _tip(b)
+                if not b.get("visible") or not re.fullmatch(r"\d+", text):
+                    j.fail("badge-tooltip", dict(key, problem="badge not shown with a number", text=text), b)
+                elif not tip:
+                    j.fail("badge-tooltip", dict(key, problem="no tooltip", number=text), b)
+                elif not re.search(rf"(?<!\d){text}(?!\d)", tip):
+                    j.fail("badge-tooltip", dict(key, problem="tooltip without the badge's number", number=text), {"tooltip": tip})
+                else:
+                    shown += 1
+            if not badges:
+                stray = [o for o in t.get("others") or [] if _tip(o)]
+                if stray:
+                    j.fail("badge-tooltip-absent", key, {"others": stray[:3]})
+    if rows and not shown:
+        j.fail("badge-tooltip-measured", {"badges": 0, "problem": "no role shows a badge with its tooltip"})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1228,6 +1282,8 @@ def judge(driver, rows, ctx=None):
         return judge_destructive(rows, ctx)
     if driver == "rebuild-menu":
         return judge_rebuild_menu(rows, ctx)
+    if driver == "badges":
+        return judge_badges(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):
