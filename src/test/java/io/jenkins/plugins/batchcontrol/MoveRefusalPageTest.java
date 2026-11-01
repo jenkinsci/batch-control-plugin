@@ -254,7 +254,10 @@ public class MoveRefusalPageTest {
      * and no form for the folder {@code prod}. Following the Create link as u1 answers 200 with
      * {@code team} filled and CREATE, not DELETE, checked; nothing moves. Guard first: while the
      * setUp's window gives Create on {@code team}, the same refusal links no form for {@code team}
-     * (T-SEC-72), so the Create link is there because Create is missing.
+     * (T-SEC-72), so the Create link is there because Create is missing. The link's
+     * {@code actions=CREATE} is asserted on the URL; that the form reads {@code actions=} is T-08-119's,
+     * not this row's ({@code team} is a regular folder, where CREATE is checked by default, so the
+     * checked CREATE here would not notice a form that ignored the parameter).
      */
     @Test
     public void t_08_291_refusalLinksACreateWindowWhenCreateIsMissingToo() throws Exception {

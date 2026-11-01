@@ -199,8 +199,10 @@ public class RequesterBuildNoticeCacheTest {
      * added by a re-designation. Guard first: nb (no Item/Build) files a request to a1 and adds a2 to
      * its approvers; a2's first and second view of it both show the notice. Then nb's other request
      * shows the notice to a1 (premise), nb gains Item/Build and adds a2 to that request too (a save);
-     * a2's first view and second, cached view of it both show no notice. A cache that kept the answer
-     * from before the save, or computed it per viewer, fails one of the four views.
+     * a2's first view and second, cached view of it both show no notice. What fails it: an answer
+     * cached before the save that the approver change does not drop, and Build evaluated as the
+     * viewer (a2) instead of the requester. A cache keyed per viewer does not fail it (a2 has no entry
+     * before the save, so its first view is fresh); T-05-38 catches that.
      */
     @Test
     public void t_05_207_newlyDesignatedApproverSeesTheReevaluatedNoticeOnEveryView() throws Exception {
