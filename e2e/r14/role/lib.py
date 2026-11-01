@@ -1,5 +1,5 @@
 """e2e-14 copy of the e2e-13 driver (role-strategy 927 on the merged main): ../r6/lib.py with screenshots
-in screenshots/run-14/ and logs in r13/out/. Default context path is the root
+in screenshots/run-14/ and logs in r14/out/role/. Default context path is the root
 (plain docker-compose.yml); set BC_BASE for another one. Same rules: one new context per
 account, red-boxed clipped shots, server state read separately with basic auth."""
 import os
