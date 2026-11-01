@@ -53,7 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Coverage lane 2, scenarios L2-11 and L2-16 (matrix rows T-GAP-241 .. T-GAP-244, T-GAP-246, T-GAP-247,
- * T-GAP-262, T-GAP-263, note 277): the {@code batch-control-strategy} monitor's actions, the review
+ * T-GAP-262, T-GAP-263, note 277; T-02-194 and T-02-195 for e2e-09 DEF-02 and DEF-03, note 366): the {@code batch-control-strategy} monitor's actions, the review
  * surfaces and the SYSTEM-build warning. The restart bullet (L2-11 (F), an item whose directory is
  * removed between sessions) is {@link StrategyMonitorRestartGapTest}.
  *
@@ -304,6 +304,73 @@ public class StrategyMonitorGapTest {
                 + UsabilityFixtures.excerpt(nested));
         assertTrue(nested.toLowerCase(Locale.ROOT).contains("guard"), "the page must say the job is still guarded: "
                 + UsabilityFixtures.excerpt(nested));
+    }
+
+    /**
+     * T-02-194 (e2e-09 DEF-02, verified in e2e-10 item 2, note 366): with a job listed as changed under a
+     * permission window, the monitor on Manage Jenkins tells the administrator to check the change on
+     * the Changes tab: its text says "Changes tab", it links {@code batch-control/changes} with an anchor
+     * reading "Changes", and "Change Records" (the old label) appears nowhere on the page.
+     */
+    @Test
+    public void t_02_194_monitorNamesTheChangesTab() throws Exception {
+        installMatrix();
+        listedJob("tab-1");
+        HtmlPage manage = manage();
+        String text = manage.asNormalizedText();
+        assertTrue(text.contains("tab-1"), "premise: the monitor lists tab-1: " + UsabilityFixtures.excerpt(text));
+        assertTrue(text.contains("Changes tab"), "the monitor must name the Changes tab: " + UsabilityFixtures.excerpt(text));
+        assertFalse(text.contains("Change Records"), "the old label \"Change Records\" must be gone: " + UsabilityFixtures.excerpt(text));
+        String changes = UsabilityFixtures.stripQueryAndSlash(new URL(j.getURL(), "batch-control/changes").toExternalForm());
+        List<String> seen = new ArrayList<>();
+        boolean linked = false;
+        for (HtmlAnchor a : manage.getAnchors()) {
+            String href = a.getHrefAttribute();
+            if (href == null || href.isEmpty() || href.startsWith("#") || href.startsWith("javascript:")) {
+                continue;
+            }
+            String target = UsabilityFixtures.stripQueryAndSlash(manage.getFullyQualifiedUrl(href).toExternalForm());
+            if (target.equals(changes)) {
+                seen.add(a.asNormalizedText());
+                linked |= a.asNormalizedText().contains("Changes");
+            }
+        }
+        assertTrue(linked, "the monitor must link the Changes tab with an anchor reading \"Changes\"; anchors to it: " + seen);
+    }
+
+    /**
+     * T-02-195 (e2e-09 DEF-03, verified in e2e-10 item 3, note 366): the page shown after "Mark as
+     * reviewed" ({@code batch-control/reviewed?item=done-2}) has the breadcrumb "Batch Control ›
+     * Marked as reviewed" and the title "Marked as reviewed": its last breadcrumb reads "Marked as
+     * reviewed", the one before it "Batch Control", and no breadcrumb names the strategy monitor
+     * ("authorization strategy", "grants need"). Premise: the page confirms the review (T-GAP-247).
+     */
+    @Test
+    public void t_02_195_reviewedPageBreadcrumbNamesTheReview() throws Exception {
+        installMatrix();
+        listedJob("done-2");
+        revokeAsM1(windowOn("done-2"));
+        assertTrue(post("admin", "markReviewed", "item=done-2", null).getStatusCode() < 400, "fixture: review of done-2");
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        wc.getOptions().setJavaScriptEnabled(false);
+        HtmlPage page = wc.goTo("batch-control/reviewed?item=done-2");
+        assertEquals(200, page.getWebResponse().getStatusCode(), "premise: the reviewed page renders");
+        assertTrue(CONFIRMATION.matcher(page.asNormalizedText()).find(), "premise: the page confirms the review: "
+                + UsabilityFixtures.excerpt(page.asNormalizedText()));
+        List<String> crumbs = new ArrayList<>();
+        for (org.htmlunit.html.DomNode n : page.querySelectorAll("li.jenkins-breadcrumbs__list-item")) {
+            crumbs.add(n.asNormalizedText().trim());
+        }
+        assertTrue(crumbs.size() >= 2, "premise: the page has breadcrumbs: " + crumbs);
+        assertEquals("Marked as reviewed", crumbs.get(crumbs.size() - 1), "the last breadcrumb must name the page: " + crumbs);
+        assertEquals("Batch Control", crumbs.get(crumbs.size() - 2), "the page must sit under Batch Control: " + crumbs);
+        for (String crumb : crumbs) {
+            String lower = crumb.toLowerCase(Locale.ROOT);
+            assertFalse(lower.contains("authorization strategy") || lower.contains("grants need"),
+                    "no breadcrumb may name the strategy monitor: " + crumbs);
+        }
+        String title = page.getTitleText() == null ? "" : page.getTitleText().trim();
+        assertTrue(title.startsWith("Marked as reviewed"), "the title must name the page, was '" + title + "'");
     }
 
     // ------------------------------------------------------------------ SYSTEM-build warning (L2-16)

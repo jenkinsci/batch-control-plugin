@@ -42,7 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * a move refused by change control, made from a browser, answers 403 with an HTML page in
  * Jenkins' standard layout, the message names the item as text (an item name with HTML-special
  * characters cannot inject markup), and nothing moves. Matrix rows T-SEC-63 (note 192), T-SEC-64,
- * T-SEC-72 and T-08-128 (a move into the Jenkins root, D-71, note 261). The plain
+ * T-SEC-72, T-08-128 (a move into the Jenkins root, D-71, note 261) and T-08-286 (the alert starts
+ * with its text, e2e-06 DEF-03, note 366). The plain
  * answer for non-browser clients stays covered by T-SEC-53..56 (MoveChangeControlTest).
  *
  * <p>Fixture as T-SEC-53: u1 holds native Item/Move and an approved [CREATE, CONFIGURE] window on
@@ -326,6 +327,52 @@ public class MoveRefusalPageTest {
     }
 
     /** Plain words for the root refusal: an administrator, the missing Create, no window to request. */
+    /**
+     * T-08-286 (e2e-06 DEF-03, verified in e2e-07 "no leading {@code <p>}": the Move refusal's text
+     * starts in the alert, note 366): on the browser refusal page of T-SEC-63 every alert of the main
+     * panel ({@code .jenkins-alert} or {@code role="alert"}) starts with its text, not with a
+     * {@code <p>} element (the defect's {@code <div class="jenkins-alert ..."><p ...>...</p></div>}
+     * left a blank band above the text); its visible text holds no literal tag text ({@code <p},
+     * {@code </p>}, {@code &lt;}) and is the refusal itself ("... was refused; nothing was moved.").
+     */
+    @Test
+    public void t_08_286_moveRefusalAlertStartsWithItsText() throws Exception {
+        Item item = prod.getItem(HOSTILE);
+        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, "u1");
+        wc.getOptions().setJavaScriptEnabled(false);
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(item.getUrl() + "move/move"), HttpMethod.POST);
+        request.setAdditionalHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        request.setRequestParameters(List.of(new NameValuePair("destination", "/team")));
+        Page page = wc.getPage(request);
+        assertEquals(403, page.getWebResponse().getStatusCode(), "premise: the move is refused");
+        assertTrue(page instanceof HtmlPage, "premise: a browser gets an HTML page");
+        org.htmlunit.html.DomNode main = ((HtmlPage) page).querySelector("#main-panel");
+        assertNotNull(main, "premise: the standard layout has a main panel");
+        List<DomElement> alerts = new java.util.ArrayList<>();
+        for (org.htmlunit.html.DomNode n : main.querySelectorAll(".jenkins-alert, [role='alert']")) {
+            alerts.add((DomElement) n);
+        }
+        assertFalse(alerts.isEmpty(), "premise: the refusal is shown in an alert: " + excerpt(page.getWebResponse().getContentAsString()));
+        boolean refusal = false;
+        for (DomElement alert : alerts) {
+            org.htmlunit.html.DomNode first = alert.getFirstChild();
+            while (first != null && first.getNodeType() == org.htmlunit.html.DomNode.TEXT_NODE && first.getTextContent().isBlank()) {
+                first = first.getNextSibling();
+            }
+            assertFalse(first instanceof DomElement e && "p".equals(e.getTagName()),
+                    "the alert must start with its text, not with a <p> element: " + alert.asXml());
+            String text = alert.asNormalizedText();
+            for (String literal : new String[] {"<p", "</p>", "&lt;", "&gt;"}) {
+                assertFalse(text.contains(literal), "the alert's text must not show the literal " + literal + ": " + text);
+            }
+            if (text.contains("was refused") && text.contains("nothing was moved")) {
+                refusal = true;
+            }
+        }
+        assertTrue(refusal, "an alert must carry the refusal (\"... was refused; nothing was moved.\"): "
+                + excerpt(main.asNormalizedText()));
+    }
+
     private static void assertRootRefusalMessage(String what, String message) {
         assertTrue(ADMINISTRATOR.matcher(message).find(), what + ": the refusal must say that an administrator must make the move: "
                 + excerpt(message));
