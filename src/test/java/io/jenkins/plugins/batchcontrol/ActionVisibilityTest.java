@@ -9,10 +9,12 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import org.htmlunit.Page;
+import org.htmlunit.WebResponse;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -148,6 +150,48 @@ public class ActionVisibilityTest {
                 "a user without BatchControl/Request must not see the job's Batch Control link; found " + plainLinks);
         assertEquals(404, status("plain", action + "/"),
                 "a user without BatchControl/Request must get 404 (absent, not refused) at /" + action + "/");
+    }
+
+    /**
+     * T-02-196 (#31 per-job action, SPEC 2 "absent, not merely refused, for a user who may not use
+     * it ... its URL and every URL beneath it (for example submit) answer 404"): a1 holds
+     * BatchControl/Approve and Item/Read but not Request. The job page lists no Batch Control link
+     * for a1, the form answers 404 and a complete, crumbed POST to {@code submit} answers 404,
+     * creating no run request and starting nothing. Guards: a1 reaches the Batch Control root page
+     * (holding a Batch Control permission is not what keeps the action away), and u1's identical
+     * submission creates exactly one request.
+     */
+    @Test
+    public void t_02_196_perJobActionIsAbsentForAnApproverWithoutRequest() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setApprovers(Arrays.asList("a1", "admin"));
+        cfg.save();
+        FreeStyleProject job = j.createFreeStyleProject("batch-y");
+        BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(true));
+        String jobPath = job.getUrl();
+        String action = jobPath + ROOT;
+
+        assertEquals(200, status("a1", ROOT + "/"), "guard: an Approve holder reaches /batch-control/");
+        Set<String> before = ApproverFormFixtures.runRequestIds();
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.submitRun(j, "u1", job, "guard: the requester submits", "admin"),
+                "guard: u1's submission");
+        assertEquals(before.size() + 1, ApproverFormFixtures.runRequestIds().size(), "guard: u1's submission creates one request");
+
+        HtmlPage approverJob = page("a1", jobPath);
+        assertEquals(200, approverJob.getWebResponse().getStatusCode(), "fixture: a1 must be able to open the job page");
+        assertTrue(linksTo(approverJob, action).isEmpty(), "an approver without Request must not see the job's Batch Control link; found "
+                + linksTo(approverJob, action));
+        assertEquals(404, status("a1", action + "/"), "an approver without Request must get 404 (absent, not refused) at /" + action + "/");
+
+        Set<String> afterGuard = ApproverFormFixtures.runRequestIds();
+        WebResponse submit = ApproverFormFixtures.submitRun(j, "a1", job, "an approver tries to request a run", "admin");
+        assertEquals(404, submit.getStatusCode(), "a crumbed POST to /" + action + "/submit by an approver without Request must answer"
+                + " 404 (absent, not refused): " + ApproverFormFixtures.excerpt(submit.getContentAsString()));
+        assertEquals(afterGuard, ApproverFormFixtures.runRequestIds(), "the approver's submission must create no run request");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "nothing may be queued");
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuilds().isEmpty(), "nothing may have run");
+        assertEquals(1, job.getNextBuildNumber(), "the next build number must not move");
     }
 
     // ---------------------------------------------------------------- helpers
