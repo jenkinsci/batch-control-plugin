@@ -200,6 +200,10 @@ def upgrade(unit):
                 if h.get("expands") == "no-help-area":
                     h["expands"] = True  # T-01: helpcheck2 shows each of these clicks adds one visible help block
         out.append(r)
+    if d == "help":
+        SKIPPED.append(("help layout", "#31 E2E-D4: the recorded help rows carry no layout (helpcheck.py measures it since "
+                                       "#31), so the replay waives the required layout (ctx pre31_layout); the synthetic "
+                                       "cases cover it"))
     if d == "monitor":
         SKIPPED.append(("monitor", "T-05: the old step never had its premise (no Install control); the new step sets up "
                                    "the global matrix itself, only a new run has its rows"))
@@ -221,7 +225,10 @@ def replay(units):
         rows = upgrade(u)
         if not rows and u["driver"] == "monitor":
             continue
-        lines = h1.judge(u["driver"], rows, u["ctx"]).lines()
+        ctx = u["ctx"]
+        if u["driver"] == "help":  # #31: the recorded help rows predate the E2E-D4 layout; it cannot be replayed
+            ctx = dict(ctx or {}, pre31_layout=True)
+        lines = h1.judge(u["driver"], rows, ctx).lines()
         for line in lines:
             if line.startswith("FAIL "):
                 (u1 if is_u1(line) else fails).append(f"[shard {u['shard']}] {line}")
@@ -343,6 +350,12 @@ def _rerun_refusal(change=None):
 
 # #31 E2E-D4: helpcheck.py's "layout" of a global configuration page as main renders it
 _LAY = {"sections": 1, "labels": 12, "pairs": 12, "overlap": [], "runin": []}
+
+
+def _help_pages(drop=None):
+    """#31 E2E-D4: helpcheck.py's rows of the two global configuration pages as main renders them, one page left out."""
+    return [{"page": p, "helps": [], "console": [], "layout": dict(_LAY)}
+            for p in ("/manage/batch-control-configuration/", "/manage/configure") if p != drop]
 
 
 def _monitor_def04(listed=True, **visit):
@@ -571,7 +584,8 @@ def synthetic():
          [{"before": "BatchControlMatrixAuthorizationStrategy", "plain": "GlobalMatrixAuthorizationStrategy", "warned": True, "dialog": True,
            "after_cancel": "GlobalMatrixAuthorizationStrategy", "after_ok": "BatchControlMatrixAuthorizationStrategy", "install_gone": True,
            "restored": "BatchControlMatrixAuthorizationStrategy", "mark_links": 1, "after_mark_cancel": 1, "after_mark_ok": 0,
-           "mark_links_on_page": [["team", 200]], "console": []}], {}, "pass", None),
+           "mark_links_on_page": [["team", 200]], "console": [],
+           **{k: v for k, v in _monitor_def04().items() if k in ("r31", "layout_global", "layout_bc")}}], {}, "pass", None),
         ("misc: the move refusal page answers 403 with its links", "misc",
          [{"sec": "R", "case": "move refusal", "role": "mover1", "window": IDS["req_pending"], "move_page": 200,
            "destinations": ["/ops", "/team"], "status": 403, "links": [["z", "/job/prod/job/z/", 200]], "still_in_prod": 200}], {}, "pass", None),
@@ -587,8 +601,19 @@ def synthetic():
         ("help: #31 E2E-D4 no Batch Control section measured", "help",
          [{"page": "/manage/configure", "helps": [], "console": [], "layout": dict(_LAY, sections=0, labels=0, pairs=0)}], {}, "fail",
          "label-layout-premise"),
-        ("help: #31 E2E-D4 every label above its text", "help",
-         [{"page": "/manage/configure", "helps": [], "console": [], "layout": dict(_LAY)}], {}, "pass", None),
+        ("help: #31 E2E-D4 every label above its text", "help", _help_pages(), {}, "pass", None),
+        ("help: #31 E2E-D4 measurement missing on Manage Jenkins > System", "help", _help_pages(drop="/manage/configure"), {},
+         "fail", "label-layout-premise"),
+        ("help: #31 E2E-D4 measurement missing on the Batch Control page", "help",
+         _help_pages(drop="/manage/batch-control-configuration/"), {}, "fail", "label-layout-premise"),
+        ("help: #31 E2E-D4 no layout on any row (the driver stopped measuring)", "help",
+         [{"page": p, "helps": [], "console": []} for p in ("/manage/batch-control-configuration/", "/manage/configure")], {},
+         "fail", "label-layout-premise"),
+        ("monitor: #31 DEF-04 measurement missing (no layout_global / layout_bc)", "monitor",
+         [{k: v for k, v in _monitor_def04().items() if k not in ("layout_global", "layout_bc")}], {}, "fail", "def04-monitor-shown"),
+        ("monitor: #31 DEF-04 measurement missing on the Batch Control strategy visit", "monitor",
+         [{k: v for k, v in _monitor_def04().items() if k != "layout_bc"}], {}, "fail", "def04-monitor-shown"),
+        ("monitor: #31 DEF-04 no monitor row at all", "monitor", [], {}, "fail", "def04-monitor-shown"),
         ("monitor: #31 DEF-04 Mark as reviewed floated to the right edge on its own line", "monitor",
          [_monitor_def04(marks=[{"item": "r31-monitor-layout", "nested": False, "button": [1090, 520, 1235, 558],
                                  "line": [271, 483, 1027, 500], "dy": 47.5, "gap": 63}])], {}, "fail", "def04-mark-beside-item"),

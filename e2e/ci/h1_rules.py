@@ -779,6 +779,10 @@ def incident_m4(r):
     return {k: r.get(k) for k, ok in want.items() if not ok}
 
 
+# #31 E2E-D4: the global configuration pages helpcheck.py must measure (its LAYOUT_PAGES)
+LAYOUT_PAGES = ("/manage/batch-control-configuration/", "/manage/configure")
+
+
 def monitor_def04(j, r):
     """#31 DEF-04 (docs/reports/e2e-06.md): on both /manage/ visits the strategy monitor shows its arranged item; each
     "Mark as reviewed" sits on the last line of its item's text (vertical centres within 2 px) right after it (gap 0..24
@@ -843,8 +847,8 @@ def judge_targeted(name, rows, ctx=None):
                 if h.get("status") != 200 or (h.get("chars") or 0) < 20 or h.get("expands") is not True:
                     j.fail("help", {"page": r.get("page"), "help": h})
             # #31 E2E-D4: a label never overlaps or runs into its description/help text on the global configuration
-            # pages (helpcheck.py LAYOUT; rows before #31 have no "layout" and are not judged). The section must be
-            # there with its labels and at least one label/text pair measured, so an empty page is no pass.
+            # pages (helpcheck.py LAYOUT). Each page of LAYOUT_PAGES must carry a layout (checked after the rows); the
+            # section must be there with its labels and at least one label/text pair measured, so an empty page is no pass.
             lay = r.get("layout")
             if lay is not None:
                 if lay.get("sections", 0) < 1 or lay.get("labels", 0) < 10 or lay.get("pairs", 0) < 1:
@@ -869,9 +873,17 @@ def judge_targeted(name, rows, ctx=None):
             if n and (r.get("after_mark_cancel") != n or r.get("after_mark_ok") != n - 1
                       or [x for x in r.get("mark_links_on_page") or [] if x[1] >= 400]):
                 j.fail("mark-reviewed", {k: r.get(k) for k in ("mark_links", "after_mark_cancel", "after_mark_ok", "mark_links_on_page")})
-            if "layout_bc" in r:  # #31 DEF-04 (s_monitor.py MONITOR; rows before #31 have no layout and are not judged)
-                monitor_def04(j, r)
+            monitor_def04(j, r)  # #31 DEF-04 (s_monitor.py MONITOR): required, a row without the measurement fails
             j.console("console", r.get("console"), {"page": "/manage/"})
+    if name == "help" and not (ctx or {}).get("pre31_layout"):
+        # #31 E2E-D4: the measurement is required; a driver change that drops it fails instead of passing silently.
+        # Only selftest_h1.py's replay of rows recorded before #31 passes pre31_layout (and lists it as skipped).
+        have = {r.get("page") for r in rows if r.get("layout") is not None}
+        for page in LAYOUT_PAGES:
+            if page not in have:
+                j.fail("label-layout-premise", {"page": page, "layout": "missing"})
+    if name == "monitor" and not rows:
+        j.fail("def04-monitor-shown", {"visit": None, "layout": "no monitor row"})
     return j
 
 
