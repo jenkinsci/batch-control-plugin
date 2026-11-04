@@ -111,6 +111,7 @@ prev="$E2E/ci/out/_previous/$(date +%Y%m%d-%H%M%S)-$K"
 DRIVER_OUT+=(r23/out)  # e2e-23 (bug-hunt batch A), on its own line
 DRIVER_OUT+=(r24/out)  # e2e-24 (wave A), on its own line
 DRIVER_OUT+=(r26/out)  # e2e-26 (wave B: #36, #34, #32, #33), on its own line
+DRIVER_OUT+=(h3/out)  # gap H3 (upgrade from the released plugin), on its own line
 for d in "${DRIVER_OUT[@]}"; do
   if [ -d "$E2E/$d" ] && [ -n "$(ls -A "$E2E/$d" 2>/dev/null)" ]; then mkdir -p "$prev/$(dirname "$d")"; mv "$E2E/$d" "$prev/$d"; fi
 done
@@ -142,6 +143,10 @@ def a = rt.getMethod('getAgent').invoke(null); a.dump(false); return 'dumped ses
     echo "jenkins_exit=$(docker inspect -f '{{.State.ExitCode}} oom={{.State.OOMKilled}}' "$JENKINS_CONTAINER" 2>/dev/null)" >> "$OUT/build-info.txt"
     echo "severe_lines=$(grep -c 'SEVERE' "$OUT/jenkins.log")" >> "$OUT/build-info.txt"
     if [ "${BC_KEEP:-0}" != 1 ]; then compose down -v --remove-orphans >/dev/null 2>&1; fi
+  fi
+  # gap H3: the upgrade unit's own controller (h3/upgrade.py removes it itself; this covers a step killed by its timeout)
+  if [ "${BC_KEEP:-0}" != 1 ] && [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=bc-h3-$K" 2>/dev/null)" ]; then
+    BC_H3_HPI=/dev/null docker compose -p "bc-h3-$K" --env-file "$E2E/.env" -f "$E2E/h3/compose.yml" down -v --remove-orphans >/dev/null 2>&1
   fi
   for d in "${DRIVER_OUT[@]}"; do
     if [ -d "$E2E/$d" ]; then mkdir -p "$OUT/driver/$(dirname "$d")"; mv "$E2E/$d" "$OUT/driver/$d"; fi

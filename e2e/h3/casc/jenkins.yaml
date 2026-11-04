@@ -1,0 +1,27 @@
+# JCasC profile of the upgrade unit (h3/compose.yml): the accounts and the Jenkins URL, nothing else.
+#
+# JCasC re-applies this file at every boot, including the boot after the upgrade. Everything the upgrade must carry
+# over unchanged (the Batch Control authorization strategy, the Batch Control configuration, the number of executors)
+# is therefore NOT here: phase A of h3/upgrade.py writes it through the released plugin, and phase C reads it back.
+# Without an authorizationStrategy entry the first boot is unsecured until phase A installs the Batch Control strategy.
+jenkins:
+  systemMessage: "Batch Control e2e (gap H3: upgrade from the released plugin)"
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: H3 Administrator
+          password: "${BC_ADMIN_PASSWORD}"
+        - id: requester
+          name: H3 Requester
+          password: "${BC_REQUESTER_PASSWORD}"
+        - id: approver-1
+          name: H3 Approver One
+          password: "${BC_APPROVER_PASSWORD}"
+        - id: approver-2
+          name: H3 Approver Two
+          password: "${BC_APPROVER_PASSWORD}"
+unclassified:
+  location:
+    url: "${BC_JENKINS_URL}"

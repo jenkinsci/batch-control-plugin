@@ -196,6 +196,18 @@ def sec_H():
 
 
 # ---------------------------------------------------------------- P
+def _row_times(s, n):
+    """(header, [cell text]) of the first table's time column (Started, else At, else Created) for its first n rows."""
+    table = s.page.locator("#main-panel table").first
+    heads = [h.strip() for h in table.locator("thead th").all_inner_texts()]
+    col = next((c for c in ("Started", "At", "Created") if c in heads), None)
+    if col is None:
+        return None, []
+    i = heads.index(col)
+    cells = [r.locator("td").nth(i).inner_text().strip() for r in table.locator("tbody tr").all()[:n]]
+    return col, cells
+
+
 def sec_P():
     s = Session("admin")
     for page in ["/batch-control/dashboard/", "/batch-control/history/?kind=runs", "/batch-control/changes/", "/batch-control/requests/",
@@ -206,6 +218,7 @@ def sec_P():
         row["next_links"] = nxt.count()
         if nxt.count():
             first = s.page.locator("#main-panel table tbody tr").first.inner_text()[:60]
+            first_time = _row_times(s, 1)
             nxt.first.click(); s.page.wait_for_load_state("load")
             second = s.page.locator("#main-panel table tbody tr").first.inner_text()[:60] if s.page.locator("#main-panel table tbody tr").count() else None
             row["next"] = {"url": s.page.url.replace(BASE, ""), "first_row_changed": first != second}
@@ -214,10 +227,16 @@ def sec_P():
                 prv.first.click(); s.page.wait_for_load_state("load")
                 back_rows = [t[:60] for t in s.page.locator("#main-panel table").first.locator("tbody tr").all_inner_texts()]
                 back = back_rows[0] if back_rows else None
+                at = back_rows.index(first) if first in back_rows else None
                 row["prev"] = {"url": s.page.url.replace(BASE, ""), "first_row_restored": back == first,
                                # where the first row of page 1 is now: the newest-first run history gains a row with
                                # every timer run (batch-cron, fast) while the pager is walked (judged in h1_rules.py)
-                               "first_row_at": back_rows.index(first) if first in back_rows else None}
+                               "first_row_at": at,
+                               # the time column of the table (Started on the run history): page 1's first row as
+                               # first read, and every row above it on the page Previous brought back -- none of these
+                               # may be older than it (h1_rules.py)
+                               "time_col": first_time[0], "first_row_time": first_time[1][0] if first_time[1] else None,
+                               "above_times": _row_times(s, at or 0)[1] if at else []}
             else:
                 row["prev"] = "MISSING on page 2"
         emit("P", row)

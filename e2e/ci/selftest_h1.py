@@ -13,7 +13,9 @@
    hovering its link, and owner instruction 3 keeps it a FAIL until the fixed driver shows otherwise in CI.
 2. Synthetic findings, each of which must give a FAIL line, and allowlist look-alikes (another URL, status, role,
    message or stack) that must not be hidden by an entry.
-3. STALE: an empty run reports the applicable allowlist entries as stale.
+3. r15/check.py's duplicate check (h1.r15_duplicates) through the runner's verdict (shard.r15_problems): repeats
+   inside core's side-panel widgets pass, repeats among task links or in the app bar fail.
+4. STALE: an empty run reports the applicable allowlist entries as stale.
 Exit 0 when every expectation holds; prints PASS/FAIL per check."""
 import argparse
 import copy
@@ -198,6 +200,14 @@ def upgrade(unit):
                 if h.get("expands") == "no-help-area":
                     h["expands"] = True  # T-01: helpcheck2 shows each of these clicks adds one visible help block
         out.append(r)
+    if d == "crawl":
+        SKIPPED.append(("crawl design references", "#31 (r6/s6.py): the recorded crawl rows carry no design-reference scan "
+                                                   "(crawl.py records it since #31), so the replay waives the required "
+                                                   "scan (ctx pre31_design_ref); the synthetic cases cover it"))
+    if d == "help":
+        SKIPPED.append(("help layout", "#31 E2E-D4: the recorded help rows carry no layout (helpcheck.py measures it since "
+                                       "#31), so the replay waives the required layout (ctx pre31_layout); the synthetic "
+                                       "cases cover it"))
     if d == "monitor":
         SKIPPED.append(("monitor", "T-05: the old step never had its premise (no Install control); the new step sets up "
                                    "the global matrix itself, only a new run has its rows"))
@@ -219,7 +229,12 @@ def replay(units):
         rows = upgrade(u)
         if not rows and u["driver"] == "monitor":
             continue
-        lines = h1.judge(u["driver"], rows, u["ctx"]).lines()
+        ctx = u["ctx"]
+        if u["driver"] == "help":  # #31: the recorded help rows predate the E2E-D4 layout; it cannot be replayed
+            ctx = dict(ctx or {}, pre31_layout=True)
+        if u["driver"] == "crawl":  # #31: the recorded crawl rows predate the design-reference scan
+            ctx = dict(ctx or {}, pre31_design_ref=True)
+        lines = h1.judge(u["driver"], rows, ctx).lines()
         for line in lines:
             if line.startswith("FAIL "):
                 (u1 if is_u1(line) else fails).append(f"[shard {u['shard']}] {line}")
@@ -238,8 +253,15 @@ def crawl_ctx(role="admin", ui="new", profile="matrix"):
     return {"role": role, "ui": ui, "ids": IDS, "prefix": PREFIX, "profile": profile}
 
 
-def page(path, status=200, role="admin", ui="new", console=()):
-    return {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+# #31: the design-reference scan r14/crawl.py puts on every page row below 400 (a clean page as main renders it)
+DESIGN_OK = {"texts": 120, "skipped": 0, "refs": [], "type": "text/html"}
+
+
+def page(path, status=200, role="admin", ui="new", console=(), design="clean"):
+    r = {"kind": "page", "page": path, "status": status, "role": role, "ui": ui, "console": list(console)}
+    if status < 400 and design is not None:
+        r["design"] = dict(DESIGN_OK) if design == "clean" else design
+    return r
 
 
 def link(p, target, status, role="admin", ui="new", label="x", data=None):
@@ -290,9 +312,14 @@ def _widget(p, widget, tag, label, href, role="admin", result="gone-on-reload"):
                 tag=tag, region="side", widget=widget, cls="jenkins-menu-dropdown-chevron")
 
 
-def _paged(p, restored, at):
-    return {"sec": "P", "page": p, "next_links": 1, "next": {"url": p + "&page=2", "first_row_changed": True},
-            "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at}}
+def _paged(p, restored, at, first="2026-10-27 12:00:00 UTC", above=None, changed=True):
+    """A misc.py P row: page 1's first row came back at index `at` below the rows whose Started times are `above`
+    (default: `at` rows each one second newer than `first`)."""
+    if above is None:
+        above = [f"2026-10-27 12:00:{at - i:02d} UTC" for i in range(at)] if at else []
+    return {"sec": "P", "page": p, "next_links": 1, "next": {"url": p + "&page=2", "first_row_changed": changed},
+            "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at,
+                     "time_col": "Started", "first_row_time": first, "above_times": above}}
 
 
 PL4 = [{"text": f"{t}\n#2", "tag": "a", "href": h, "cls": "jenkins-dropdown__item"} for t, h in
@@ -310,6 +337,153 @@ def _menu(p, hover_items, click_items, boxes_after=2, legacy=None):
         c.update(settled=True, submenu_items=len(click_items), submenu=click_items)
     return {"user": "requester", "page": p, "items": [{"text": "Permalinks", "tag": "button", "href": None}], "status": {},
             "duplicates": [], "empty_href_anchors": [], "clicks": {"Permalinks": c}, "console": [], "bad": []}
+
+
+def _incident(change=None, role="admin"):
+    """A row of r14/s_incident.py with the M4 fields (2026-10-31) as a correct run records it; `change` replaces fields."""
+    c = f"comment by {role} e2e-12"
+    r = {"role": role, "id": "20261031-120000-abc123", "state_before": "Open", "forms_before": ["acknowledge", "addComment", "rerun"],
+         "stored_before": "OPEN", "comment_status": 200, "comment_visible": True,
+         "history_after_comment": [["Open", "SYSTEM", ""], ["Open", role, c]], "state_after_comment": "Open", "ack_status": 200,
+         "state_after_ack": "Acknowledged", "after_ack_forms": ["resolve", "addComment", "rerun"], "stored_after_ack": "ACKNOWLEDGED",
+         "resolve_status": 200, "state_after_resolve": "Resolved", "forms_after_resolve": ["addComment", "rerun"],
+         "history_after_resolve": [["Open", "SYSTEM", ""], ["Open", role, c], ["Acknowledged", role, "ack"],
+                                   ["Resolved", role, "resolved e2e-12"]], "stored_after_resolve": "RESOLVED"}
+    r.update(change or {})
+    return r
+
+
+def _rerun_refusal(change=None):
+    r = {"case": "rerun validation", "id": "20261031-120100-def456", "status": 400, "errors": ["Check at least one approver."],
+         "reruns_before": [], "state_after_refusal": "Open", "forms_after_refusal": ["acknowledge", "addComment", "rerun"],
+         "reruns_after": []}
+    r.update(change or {})
+    return r
+
+
+# #31 E2E-D4: helpcheck.py's "layout" of a global configuration page as main renders it
+_LAY = {"sections": 1, "labels": 12, "pairs": 12, "overlap": [], "runin": []}
+
+
+def _help_pages(drop=None):
+    """#31 E2E-D4: helpcheck.py's rows of the two global configuration pages as main renders them, one page left out."""
+    return [{"page": p, "helps": [], "console": [], "layout": dict(_LAY)}
+            for p in ("/manage/batch-control-configuration/", "/manage/configure") if p != drop]
+
+
+def _monitor_def04(listed=True, **visit):
+    """#31 DEF-04: an s_monitor.py row as main renders it (Install and Mark as reviewed passing), with `visit` changed."""
+    lay = {"before_install": True, "marks": [{"item": "team", "nested": False, "button": [817, 510, 962, 548],
+                                              "line": [153, 521, 811, 538], "dy": 0, "gap": 6}],
+           "controls": [{"text": "Install the Batch Control variant", "box": [970, 201, 1200, 237]},
+                        {"text": "Dismiss", "box": [1208, 201, 1244, 237]}],
+           "icons": 1, "button_icons": [], "icon_classes": ["app-adminmonitor-icon"]}
+    return {"before": "BatchControlMatrixAuthorizationStrategy", "plain": "GlobalMatrixAuthorizationStrategy", "warned": True,
+            "dialog": True, "after_cancel": "GlobalMatrixAuthorizationStrategy", "after_ok": "BatchControlMatrixAuthorizationStrategy",
+            "install_gone": True, "restored": "BatchControlMatrixAuthorizationStrategy", "console": [],
+            "r31": {"listed": listed}, "layout_global": dict(lay, **visit), "layout_bc": dict(lay, **visit, before_install=False)}
+
+
+# #31 (r6/s5c.py): reject_color.py D rows as main renders them. Light theme colours: the destructive red (the probe),
+# the text colour, the primary (accent) colour of a non-destructive dialog's OK button.
+# Values as Chromium reported them on main (2026-11-02): computed colours in oklch, canvas-normalised "r,g,b,a"; core
+# paints the button background on ::before.
+RED, TEXT, ACCENT = "oklch(0.6 0.2671 30)", "oklch(0.05 0.075 256.91)", "oklch(0.55 0.2 260)"
+WHITE, NONE, ITEM = "rgb(255, 255, 255)", "rgba(0, 0, 0, 0)", "oklch(0.97 0.005 256.91)"
+NORM = {RED: "248,0,0,255", TEXT: "0,8,35,255", ACCENT: "0,92,230,255", WHITE: "255,255,255,255", NONE: "0,0,0,0",
+        ITEM: "243,245,248,255"}
+
+
+def _btn(label, color, before, classes):
+    return {"label": label, "color": color, "bg": NONE, "before_bg": before, "classes": classes, "visible": True,
+            "n": {"color": NORM[color], "bg": NORM[NONE], "before_bg": NORM[before]}}
+
+
+def _destructive(where, control, **change):
+    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke"}[control]
+    r = {"where": where, "control": control, "user": "admin" if control == "Revoke" else "requester", "page": "/batch-control/x/",
+         "http": 200, "probe": RED, "around": TEXT, "count": 1,
+         "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
+                    "classes": "jenkins-button jenkins-!-destructive-color confirmation-link"},
+         "dialog": {"probe": RED, "probe_n": NORM[RED], "title": "Cancel this run request?", "text": "...",
+                    "buttons": ["Cancel", ok_text],
+                    "ok": _btn(ok_text, WHITE, RED, "jenkins-button jenkins-button--primary jenkins-!-destructive-color"),
+                    "cancel": _btn("Cancel", TEXT, ITEM, "jenkins-button")},
+         "closed_on_cancel": True, "url_after_cancel": "/batch-control/x/", "state_before": True, "state_after": True}
+    for k, v in change.items():
+        if isinstance(v, dict) and isinstance(r.get(k), dict):
+            r[k] = dict(r[k], **v)
+        else:
+            r[k] = v
+    return r
+
+
+def _destructive_rows(drop=None, **changes):
+    """All five D rows; `changes` maps a row's where (spaces as _) to its changes."""
+    return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
+
+
+# #31 (r8/rebuild.py): gate.py L's row as main renders it
+def _rebuild(**change):
+    r = {"user": "nobc", "job": "r19-gate", "build": 1, "approved_build": 1, "flag": "true", "overflow_button": 1,
+         "menu": [{"text": "Rebuild Last", "tag": "a", "href": "/jenkins/job/r19-gate/lastCompletedBuild/rebuild/parameterized"},
+                  {"text": "Rename", "tag": "a", "href": "/jenkins/job/r19-gate/confirm-rename"},
+                  {"text": "Permalinks", "tag": "button", "href": None}],
+         "menu_console": [], "entry_status": 200, "entry_url": "/job/r19-gate/lastCompletedBuild/rebuild/parameterized", "form": 1,
+         "submit_status": 400, "submit_url": "/job/r19-gate/lastCompletedBuild/rebuild/configSubmit",
+         "submit_text": "Approval required. This build was not started. Job r19-gate only runs through an approved Batch Control run request.",
+         "queue": [], "next_build_before": 2, "next_build": 2,
+         "records": [{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #1 by 'nobc' - "
+                      "a re-run does not reuse an earlier approval; submit a new run request"}], "flag_restored": "true"}
+    r.update(change)
+    return r
+
+
+# #31 (r9/s76.py): round3.py B rows. A designated approver sees decisions (WARNING), a requester their own pending
+# requests (INFO), an auditor no badge; the wording is not judged, only the tooltip and its number.
+def _badge(n, tip="", **kw):
+    return dict({"text": str(n), "visible": True, "cls": "jenkins-badge jenkins-!-warning-color", "tooltip": tip,
+                 "data_tooltip": None, "title": None}, **kw)
+
+
+def _tab(tab, *badges, others=()):
+    return {"tab": tab, "label": tab.title() + "".join(f" {b['text']}" for b in badges), "badges": list(badges),
+            "others": list(others)}
+
+
+def _badge_row(user, *tabs, status=200):
+    return {"user": user, "status": status, "tabs": [_tab("overview")] + list(tabs)}
+
+
+def _badge_rows(**change):
+    """One row per h1.BADGE_ROLES role; `change` maps a role (- as _) to its replacement row (None drops it)."""
+    rows = {u: _badge_row(u) for u in h1.BADGE_ROLES}
+    rows["approver-1"] = _badge_row("approver-1", _tab("requests", _badge(3, "3 run requests are awaiting your decision")),
+                                    _tab("activations"), _tab("grants", _badge(1, "1 grant request is awaiting your decision")))
+    rows["requester"] = _badge_row("requester", _tab("requests", _badge(12, "12 of your run requests are pending")),
+                                   _tab("grants"))
+    for k, v in change.items():
+        rows[k.replace("_", "-")] = v
+    return [r for r in rows.values() if r is not None]
+
+
+INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
+    ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
+    ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
+    ("the Status row not Open before anything is pressed", {"state_before": "Acknowledged"}),
+    ("the store not OPEN before anything is pressed", {"stored_before": "ACKNOWLEDGED"}),
+    ("Add Comment answered 403", {"comment_status": 403}),
+    ("the comment changed the status", {"state_after_comment": "Acknowledged"}),
+    ("the comment not in the History by the role", {"history_after_comment": [["Open", "SYSTEM", ""]]}),
+    ("Acknowledge answered 500", {"ack_status": 500}),
+    ("the Status row not Acknowledged after the acknowledgement", {"state_after_ack": "Open"}),
+    ("Acknowledge still offered after the acknowledgement", {"after_ack_forms": ["acknowledge", "resolve", "addComment"]}),
+    ("the store not ACKNOWLEDGED after the acknowledgement", {"stored_after_ack": "OPEN"}),
+    ("Resolve answered 400", {"resolve_status": 400}),
+    ("the store not RESOLVED after the resolution", {"stored_after_resolve": "ACKNOWLEDGED"}),
+    ("the History lacks the Resolved row with its comment", {"history_after_resolve": [["Acknowledged", "admin", "ack"],
+                                                                                         ["Resolved", "admin", ""]]}),
+]
 
 
 def synthetic():
@@ -449,10 +623,52 @@ def synthetic():
         # misc P: the newest-first run history gains timer runs while its pager is walked
         ("misc: Previous on the run history brings page 1 back with two new runs on top", "misc",
          [_paged("/batch-control/history/?kind=runs", False, 2)], {}, "pass", None),
+        ("misc: Previous on the run history brings page 1 back moved down 6 rows, all newer (run 40326682006)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6)], {}, "pass", None),
+        ("misc: Previous on the run history restores page 1 exactly", "misc",
+         [_paged("/batch-control/history/?kind=runs", True, 0, above=[])], {}, "pass", None),
+        ("not hidden: the run history's first row moved down 6 rows with an older row above it", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6, above=["2026-10-27 12:00:06 UTC", "2026-10-27 12:00:05 UTC", "2026-10-27 11:59:59 UTC",
+                                       "2026-10-27 12:00:03 UTC", "2026-10-27 12:00:02 UTC", "2026-10-27 12:00:01 UTC"])],
+         {}, "fail", "P-paging"),
+        ("misc: the run history's first row moved down below a row of the same second (equal is sorted correctly)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["2026-10-27 12:00:00 UTC"])], {}, "pass", None),
+        ("not hidden: the run history's first row moved down below a row of the same second and an older row", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 2, above=["2026-10-27 12:00:00 UTC", "2026-10-27 11:59:59 UTC"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down below a same-second row in another zone", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["2026-10-27 12:00:00 KST"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down below a row whose time does not parse", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["yesterday"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down with no times recorded above it", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 2, above=[])], {}, "fail", "P-paging"),
+        ("not hidden: run 40326682006's row as the old driver recorded it (moved 6, no times to prove them newer)", "misc",
+         [{"sec": "P", "page": "/batch-control/history/?kind=runs", "next_links": 1,
+           "next": {"url": "/batch-control/history/?kind=runs&page=2", "first_row_changed": True},
+           "prev": {"url": "/batch-control/history/?kind=runs&page=1", "first_row_restored": False, "first_row_at": 6}}],
+         {}, "fail", "P-paging"),
         ("not hidden: Previous on the run history lands on a page without page 1's first row", "misc",
          [_paged("/batch-control/history/?kind=runs", False, None)], {}, "fail", "P-paging"),
-        ("not hidden: a moved first row on a list no timer writes to (changes)", "misc",
-         [_paged("/batch-control/changes/", False, 1)], {}, "fail", "P-paging"),
+        ("not hidden: Next on the run history did not change the first row (moved-down Previous otherwise fine)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6, changed=False)], {}, "fail", "P-paging"),
+        ("not hidden: a moved first row on a list no timer writes to (changes), newer rows above", "misc",
+         [_paged("/batch-control/changes/", False, 6)], {}, "fail", "P-paging"),
+        ("misc: a list no timer writes to (changes) restored exactly", "misc",
+         [_paged("/batch-control/changes/", True, 0, above=[])], {}, "pass", None),
+        # incident M4 (2026-10-31): the state machine through the forms; the refused rerun stays on the incident
+        ("incident: Open -> comment -> Acknowledged -> Resolved through the forms", "incident", [_incident()], {}, "pass", None),
+        ("incident: the same for approver-1", "incident", [_incident(role="approver-1")], {}, "pass", None),
+        ("incident: a row recorded before M4 (no M4 fields) is judged as before", "incident",
+         [{k: v for k, v in _incident().items() if k in ("role", "comment_visible", "after_ack_forms", "state_after_resolve",
+                                                          "forms_after_resolve")}], {}, "pass", None),
+    ] + [(f"not hidden: incident M4, {what}", "incident", [_incident(change)], {}, "fail", "incident-m4")
+         for what, change in INCIDENT_M4_BREAKS] + [
+        ("incident: the refused rerun stays on the incident page, nothing linked", "incident", [_rerun_refusal()], {}, "pass", None),
+        ("not hidden: the refused rerun linked a rerun request", "incident", [_rerun_refusal({"reruns_after": ["x"]})], {}, "fail",
+         "rerun-refusal-state"),
+        ("not hidden: the refused rerun's page lost the rerun form", "incident",
+         [_rerun_refusal({"forms_after_refusal": ["acknowledge", "addComment"]})], {}, "fail", "rerun-refusal-state"),
+        ("not hidden: the refused rerun's page is not the incident (no Status row)", "incident",
+         [_rerun_refusal({"state_after_refusal": None})], {}, "fail", "rerun-refusal-state"),
         ("actions: nobc may open a run request (200 where 404)", "actions",
          [{"role": "nobc", "item": "run", "probe_status": 200, "controls": []}], {}, "fail", "probe"),
         ("misc: nobc reads the History (200 where 404)", "misc", [{"sec": "H", "role": "nobc", "status": 200}], {}, "fail", "H-status"),
@@ -464,12 +680,43 @@ def synthetic():
          [{"before": "BatchControlMatrixAuthorizationStrategy", "plain": "GlobalMatrixAuthorizationStrategy", "warned": True, "dialog": True,
            "after_cancel": "GlobalMatrixAuthorizationStrategy", "after_ok": "BatchControlMatrixAuthorizationStrategy", "install_gone": True,
            "restored": "BatchControlMatrixAuthorizationStrategy", "mark_links": 1, "after_mark_cancel": 1, "after_mark_ok": 0,
-           "mark_links_on_page": [["team", 200]], "console": []}], {}, "pass", None),
+           "mark_links_on_page": [["team", 200]], "console": [],
+           **{k: v for k, v in _monitor_def04().items() if k in ("r31", "layout_global", "layout_bc")}}], {}, "pass", None),
         ("misc: the move refusal page answers 403 with its links", "misc",
          [{"sec": "R", "case": "move refusal", "role": "mover1", "window": IDS["req_pending"], "move_page": 200,
            "destinations": ["/ops", "/team"], "status": 403, "links": [["z", "/job/prod/job/z/", 200]], "still_in_prod": 200}], {}, "pass", None),
         ("misc: the move refusal never reached (no destination)", "misc",
          [{"sec": "R", "case": "move refusal", "role": "mover1", "move_page": 200, "destinations": [], "still_in_prod": 200}], {}, "fail", "R-move"),
+        ("help: #31 E2E-D4 description on the checkbox caption's line", "help",
+         [{"page": "/manage/batch-control-configuration/", "helps": [], "console": [],
+           "layout": dict(_LAY, runin=[{"label": "Enable run control", "labelBox": [10, 100, 130, 118], "descBox": [130, 100, 600, 118]}])}], {}, "fail", "label-description-same-line"),
+        ("help: #31 E2E-D4 label and description boxes overlap", "help",
+         [{"page": "/manage/configure", "helps": [], "console": [],
+           "layout": dict(_LAY, overlap=[{"label": "Enable run control", "labelBox": [10, 100, 130, 118], "descBox": [100, 110, 600, 130]}])}],
+         {}, "fail", "label-description-overlap"),
+        ("help: #31 E2E-D4 no Batch Control section measured", "help",
+         [{"page": "/manage/configure", "helps": [], "console": [], "layout": dict(_LAY, sections=0, labels=0, pairs=0)}], {}, "fail",
+         "label-layout-premise"),
+        ("help: #31 E2E-D4 every label above its text", "help", _help_pages(), {}, "pass", None),
+        ("help: #31 E2E-D4 measurement missing on Manage Jenkins > System", "help", _help_pages(drop="/manage/configure"), {},
+         "fail", "label-layout-premise"),
+        ("help: #31 E2E-D4 measurement missing on the Batch Control page", "help",
+         _help_pages(drop="/manage/batch-control-configuration/"), {}, "fail", "label-layout-premise"),
+        ("help: #31 E2E-D4 no layout on any row (the driver stopped measuring)", "help",
+         [{"page": p, "helps": [], "console": []} for p in ("/manage/batch-control-configuration/", "/manage/configure")], {},
+         "fail", "label-layout-premise"),
+        ("monitor: #31 DEF-04 measurement missing (no layout_global / layout_bc)", "monitor",
+         [{k: v for k, v in _monitor_def04().items() if k not in ("layout_global", "layout_bc")}], {}, "fail", "def04-monitor-shown"),
+        ("monitor: #31 DEF-04 measurement missing on the Batch Control strategy visit", "monitor",
+         [{k: v for k, v in _monitor_def04().items() if k != "layout_bc"}], {}, "fail", "def04-monitor-shown"),
+        ("monitor: #31 DEF-04 no monitor row at all", "monitor", [], {}, "fail", "def04-monitor-shown"),
+        ("monitor: #31 DEF-04 Mark as reviewed floated to the right edge on its own line", "monitor",
+         [_monitor_def04(marks=[{"item": "r31-monitor-layout", "nested": False, "button": [1090, 520, 1235, 558],
+                                 "line": [271, 483, 1027, 500], "dy": 47.5, "gap": 63}])], {}, "fail", "def04-mark-beside-item"),
+        ("monitor: #31 DEF-04 Before you install shows the icon twice", "monitor",
+         [_monitor_def04(icons=2, icon_classes=["app-adminmonitor-icon", "icon-sm"])], {}, "fail", "def04-alert-icons"),
+        ("monitor: #31 DEF-04 the arranged item never listed", "monitor", [_monitor_def04(listed=False)], {}, "fail", "def04-premise"),
+        ("monitor: #31 DEF-04 buttons beside their items, one icon", "monitor", [_monitor_def04()], {}, "pass", None),
         ("help: a help block that does not open", "help2", [{"page": "/x", "help": "y", "before": 3, "after": 3}], {}, "fail", "help-click"),
         ("role: Manage Roles save loses the window (200 -> 403)", "role/grant_overlay",
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
@@ -486,6 +733,110 @@ def synthetic():
          crawl_ctx("requester"), "pass", None),
         ("allowed: Workspace 404 for admin, classic (C-04)", "crawl", [link(WS_PAGE, "/job/ops/job/job-a/ws/", 404, ui="classic", label="Workspace")],
          crawl_ctx(ui="classic"), "pass", None),
+        # #31 (r6/s5c.py): Cancel Request and Revoke are red and open red confirmation dialogs (reject_color.py D)
+        ("destructive: #31 every control red, every dialog's OK red, Cancel changes nothing", "destructive", _destructive_rows(),
+         {}, "pass", None),
+        ("destructive: #31 Cancel Request without the destructive class (text colour)", "destructive",
+         _destructive_rows(run_request={"button": {"color": TEXT, "classes": "jenkins-button confirmation-link"}}), {}, "fail",
+         "destructive-button"),
+        ("destructive: #31 the window page shows no Revoke", "destructive", _destructive_rows(window={"button": None, "count": 0,
+                                                                                                    "dialog": None}),
+         {}, "fail", "destructive-button"),
+        ("destructive: #31 Revoke's dialog not destructive (OK in the accent colour)", "destructive",
+         _destructive_rows(grants_list={"dialog": {"ok": _btn("Revoke", WHITE, ACCENT, "jenkins-button jenkins-button--primary")}}),
+         {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the OK button's red only matches after normalisation (rgb vs oklch)", "destructive",
+         _destructive_rows(window={"dialog": {"ok": dict(_btn("Revoke", WHITE, RED, "jenkins-button jenkins-button--primary"),
+                                                         before_bg="rgb(248, 0, 0)")}}), {}, "pass", None),
+        ("destructive: #31 the click opens no dialog", "destructive", _destructive_rows(activation_request={"dialog": None}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 the dialog's Cancel is red too", "destructive",
+         _destructive_rows(permission_window_request={"dialog": {"cancel": _btn("Cancel", RED, ITEM, "jenkins-button")}}), {},
+         "fail", "destructive-dialog"),
+        ("destructive: #31 Cancel in the dialog cancelled the request", "destructive",
+         _destructive_rows(run_request={"state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the window never conferred (no premise for 'nothing changed')", "destructive",
+         _destructive_rows(window={"state_before": False, "state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the probe does not resolve (same colour as the text)", "destructive",
+         _destructive_rows(run_request={"probe": TEXT, "button": {"color": TEXT}}), {}, "fail", "destructive-measured"),
+        ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
+         "destructive-measured"),
+        ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
+        # #31 (r8/rebuild.py): Rebuild Last from the new job page's More actions (gate.py L)
+        ("rebuild-menu: #31 offered with its URL, refused, nothing queued, recorded", "rebuild-menu", [_rebuild()], {}, "pass", None),
+        ("rebuild-menu: #31 DEF-06: the menu stays empty", "rebuild-menu",
+         [_rebuild(menu=[], menu_console=["pageerror: Cannot read properties of null (reading 'startsWith')"], entry_status=None,
+                   entry_url=None, form=None, submit_status=None, submit_text=None, records=[])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 DEF-06: Rebuild Last with a null URL", "rebuild-menu",
+         [_rebuild(menu=[{"text": "Rebuild Last", "tag": "a", "href": None}])], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the entry does not open the rebuild form", "rebuild-menu",
+         [_rebuild(entry_status=404, form=0)], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 no row (the section did not run)", "rebuild-menu", [], {}, "fail", "rebuild-menu-offered"),
+        ("rebuild-menu: #31 the rebuild was accepted and queued", "rebuild-menu",
+         [_rebuild(submit_status=200, submit_text="r19-gate #2", queue=[{"id": 7}], next_build=3, records=[])], {}, "fail",
+         "rebuild-menu-refused"),
+        ("rebuild-menu: #31 refused but not recorded", "rebuild-menu", [_rebuild(records=[])], {}, "fail", "rebuild-menu-refused"),
+        ("rebuild-menu: #31 recorded for another build", "rebuild-menu",
+         [_rebuild(records=[{"type": "TRIGGER_BLOCKED", "user": "nobc", "detail": "Blocked a Rebuild of job 'r19-gate' build #7 by 'nobc'"}])],
+         {}, "fail", "rebuild-menu-refused"),
+        # #31 (r9/s76.py): the tab badges carry a tooltip with their number (round3.py B)
+        ("badges: #31 every badge has a tooltip with its number, no badge no tooltip", "badges", _badge_rows(), {}, "pass", None),
+        ("badges: #31 the tooltip only as title (core's tooltip script)", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None, title="2 waiting for you")))), {},
+         "pass", None),
+        ("badges: #31 a badge without a tooltip", "badges",
+         _badge_rows(approver_2=_badge_row("approver-2", _tab("requests", _badge(2, None)))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 an empty tooltip", "badges",
+         _badge_rows(requester=_badge_row("requester", _tab("requests", _badge(4, "  ")))), {}, "fail", "badge-tooltip"),
+        ("badges: #31 a tooltip with another number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "4 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 '3' inside '13' is not the badge's number", "badges",
+         _badge_rows(approver_1=_badge_row("approver-1", _tab("requests", _badge(3, "13 run requests are awaiting your decision")))),
+         {}, "fail", "badge-tooltip"),
+        ("badges: #31 a badge element without a number", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge("", "grant requests are pending")))), {}, "fail",
+         "badge-tooltip"),
+        ("badges: #31 a hidden badge", "badges",
+         _badge_rows(manager=_badge_row("manager", _tab("grants", _badge(2, "2 grant requests are pending", visible=False)))), {},
+         "fail", "badge-tooltip"),
+        ("badges: #31 a tab without a badge announces a count in a tooltip", "badges",
+         _badge_rows(auditor=_badge_row("auditor", _tab("requests", others=[{"tag": "span", "tooltip": "2 run requests are pending",
+                                                                             "data_tooltip": None, "title": None}]))), {},
+         "fail", "badge-tooltip-absent"),
+        ("badges: #31 the approver-unlisted row is missing", "badges", _badge_rows(approver_unlisted=None), {}, "fail",
+         "badge-tooltip-measured"),
+        ("badges: #31 auditor's overview not measured (403, no tabs)", "badges",
+         _badge_rows(auditor={"user": "auditor", "status": 403, "tabs": None}), {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no role shows a badge (the check would pass on nothing)", "badges",
+         [_badge_row(u) for u in h1.BADGE_ROLES], {}, "fail", "badge-tooltip-measured"),
+        ("badges: #31 no row at all", "badges", [], {}, "fail", "badge-tooltip-measured"),
+        # #31 (r6/s6.py): internal design references on a page a user sees
+        ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
+         [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 'SPEC item' in a tooltip behind Advanced", "crawl",
+         [{"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded",
+           "design": {"texts": 90, "skipped": 0, "refs": [{"match": "SPEC item", "text": "see SPEC item 2", "el": "a@title"}]}}],
+         crawl_ctx(), "fail", "design-ref"),
+        ("crawl: #31 driver-typed text with a D-number is skipped, nothing else found", "crawl",
+         [page(req, design={"texts": 80, "skipped": 1, "refs": []})], crawl_ctx(), "pass", None),
+        ("crawl: #31 a page below 400 without the scan (the driver stopped measuring)", "crawl",
+         [page(req, design=None)], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a scan that read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": []})], crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 an HTML page whose scan read no text", "crawl",
+         [page(req, design={"texts": 0, "skipped": 0, "refs": [], "type": "text/html"})], crawl_ctx(), "fail",
+         "design-ref-measured"),
+        ("crawl: #31 a JSON document (shown in a <pre>) needs no scanned text", "crawl",
+         [page("/batch-control/history/summary", design={"texts": 0, "skipped": 0, "refs": [], "type": "application/json"})],
+         crawl_ctx(), "pass", None),
+        ("crawl: #31 an Advanced row without the scan", "crawl",
+         [page("/manage/batch-control-configuration/"),
+          {"kind": "advanced", "page": "/manage/batch-control-configuration/", "role": "admin", "ui": "new", "result": "expanded"}],
+         crawl_ctx(), "fail", "design-ref-measured"),
+        ("crawl: #31 a 403 page is not scanned and needs no scan", "crawl",
+         [page("/batch-control/dashboard/", 403, role="requester", design=None)], crawl_ctx("requester"), "pass", None),
         ("allowed: the header.js page error by its stack (U-1)", "crawl", [page(req, console=[U1_ENTRY])], crawl_ctx(), "pass", None),
         ("allowed: D-70 by its exact message", "crawl", [page("/job/batch-daily/", console=[D70_LINE])], crawl_ctx(), "pass", None),
         ("allowed: warnings are never judged", "crawl", [page(req, console=["warning: .behavior-loading is deprecated"])], crawl_ctx(), "pass", None),
@@ -534,6 +885,83 @@ def run_synthetic():
     return results
 
 
+def _el(text, region="side", widget=None, tag="a", href="x/"):
+    """An element as r15/check.py's COLLECT records it."""
+    return {"tag": tag, "text": text, "href": href, "region": region, "visible": True, "widget": widget}
+
+
+def r15_check_cases():
+    """r15/check.py's duplicate check (h1.r15_duplicates) and the runner's verdict on the row (shard.r15_problems):
+    (name, collected elements, want "fail" | "pass")."""
+    tasks = [_el("Status"), _el("Changes"), _el("Build with Parameters"), _el("Request Run"), _el("Configure")]
+    history = [_el("Builds", widget="jenkins-builds"), _el("Success", widget="jenkins-build-history"),
+               _el("#2 10:41 PM", widget="jenkins-build-history"), _el("Success", widget="jenkins-build-history"),
+               _el("#1 10:40 PM", widget="jenkins-build-history"), _el("Newer builds", tag="button", widget="jenkins-builds"),
+               _el("Older builds", tag="button", widget="jenkins-builds")]
+    return [
+        # CI run 40504779419 (admin, classic, /job/batch-daily/batch-control-activation/): two builds' status badges
+        ("r15 check: two \"Success\" badges inside the build history widget", tasks + history, "pass"),
+        ("r15 check: two identical queue / executor entries (batch-cron) inside their panes", tasks + [
+            _el("batch-cron", widget="buildQueue"), _el("batch-cron", widget="buildQueue"),
+            _el("batch-cron #21", widget="executors"), _el("Cancel", widget="executors"),
+            _el("batch-cron #22", widget="executors"), _el("Cancel", widget="executors")], "pass"),
+        ("r15 check: a task link and a widget entry with the same text", tasks + [_el("Status", widget="executors")], "pass"),
+        ("not hidden: two \"Request Run\" task links in the side panel outside the widgets",
+         tasks + [_el("Request Run")] + history, "fail"),
+        ("not hidden: two \"Success\" entries in the side panel outside the widgets", tasks + [_el("Success"), _el("Success")], "fail"),
+        ("not hidden: a duplicate app-bar entry", tasks + [_el("Request Run", "appbar"), _el("Request Run", "appbar")], "fail"),
+        ("not hidden: a widget id that is not one of core's repeating widgets",
+         tasks + [_el("Request Run", widget="tasks"), _el("Request Run", widget="tasks")], "fail"),
+    ]
+
+
+STOP_CI = "/computer/(built-in)/executors/1/stopBuild?runExtId=batch-cron%2321"
+
+
+def r15_stop_cases():
+    """r15/check.py's fetched links (h1.r15_core_stop, then shard.r15_problems): (name, element, path, status, want)."""
+    stop = lambda w: {"tag": "a", "text": "Cancel", "region": "side", "cls": "stop-button-link", "widget": w}  # noqa: E731
+    return [
+        # CI run 40504779419 (admin, new job page, /job/team-mb/batch-control-activation/)
+        ("r15 check: the executors pane's stop button of CI run 40504779419, GET 405", stop("executors"), STOP_CI, 405, "pass"),
+        ("r15 check: a one-off executor's stop button whose build ended, GET 404", stop("executors"),
+         "/computer/(built-in)/oneOffExecutors/0/stopBuild?runExtId=batch-pipeline%237", 404, "pass"),
+        ("r15 check: the Build Queue's cancel button, GET 405", stop("buildQueue"), "/queue/cancelItem?id=42", 405, "pass"),
+        ("r15 check: the build history's stop button of a running build, GET 405", stop("jenkins-build-history"),
+         "/job/team-mb/job/main/3/stop", 405, "pass"),
+        ("not hidden: the same stop URL outside a widget", stop(None), STOP_CI, 405, "fail"),
+        ("not hidden: the same stop URL answering 500", stop("executors"), STOP_CI, 500, "fail"),
+        ("not hidden: a regular executor's stopBuild answering 404", stop("executors"), STOP_CI, 404, "fail"),
+        ("not hidden: a plugin link in the executors pane answering 405, not a stop path", stop("executors"),
+         "/job/batch-daily/batch-control-activation/submit", 405, "fail"),
+        ("not hidden: the stop URL without core's stop-button-link class", dict(stop("executors"), cls="task-link"),
+         STOP_CI, 405, "fail"),
+        ("not hidden: a stop URL of another pane (queue cancel in the executors pane)", stop("executors"),
+         "/queue/cancelItem?id=42", 405, "fail"),
+        ("not hidden: a stop URL with a trailing extra (no full match)", stop("executors"), STOP_CI + "&x=1", 405, "fail"),
+    ]
+
+
+def run_r15_check():
+    spec = importlib.util.spec_from_file_location("bc_shard", HERE / "shard.py")
+    shard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shard)
+    results = []
+    for name, e, path, st, want in r15_stop_cases():
+        kind = h1.r15_core_stop(e, path, st) or "link_status"  # r15/check.py's fallback for a status >= 400
+        left = shard.r15_problems({"problems": [{"kind": kind, "text": e["text"], "region": e["region"], "url": path,
+                                                 "status": st}], "console": [], "bad_responses": []})
+        ok = bool(left) if want == "fail" else not left
+        results.append((ok, name, want, left[:2]))
+    for name, els, want in r15_check_cases():
+        dups, _ = h1.r15_duplicates(els)
+        left = shard.r15_problems({"user": "admin", "flag": "false", "page": "/job/batch-daily/batch-control-activation/",
+                                   "problems": dups, "console": [], "bad_responses": []})
+        ok = bool(left) if want == "fail" else not left
+        results.append((ok, name, want, left[:2]))
+    return results
+
+
 def run_stale():
     lines = h1.judge("crawl", [], crawl_ctx("admin", "classic")).lines()
     stale = {x.split()[2] for x in lines if x.startswith("STALE allow ")}
@@ -579,10 +1007,13 @@ def check_all(baseline=None):
     syn = run_synthetic()
     for ok, name, want, fl in syn:
         report.append(f"{'PASS' if ok else 'FAIL'} selftest-h1 synthetic ({want}): {name}" + ("" if ok else f" -> {fl}"))
+    r15c = run_r15_check()
+    for ok, name, want, left in r15c:
+        report.append(f"{'PASS' if ok else 'FAIL'} selftest-h1 r15 check ({want}): {name}" + ("" if ok else f" -> {left}"))
     st_ok, stale_ids, want_ids = run_stale()
     report.append(f"{'PASS' if st_ok else 'FAIL'} selftest-h1 stale: an empty admin classic crawl reports {sorted(stale_ids)}"
                   + ("" if st_ok else f", expected {sorted(want_ids)}"))
-    good = not fails and all(ok for ok, *_ in syn) and st_ok
+    good = not fails and all(ok for ok, *_ in syn) and all(ok for ok, *_ in r15c) and st_ok
     return good, report
 
 

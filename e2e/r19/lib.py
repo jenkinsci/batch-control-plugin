@@ -35,6 +35,10 @@ UUID, N, LOGNAME = _l.UUID, _l.N, _l.LOGNAME
 LOGNAME[0] = "r19"
 CONTAINER = (os.environ["BC_CONTAINER"] + "-jenkins") if os.environ.get("BC_CONTAINER") else "batch-control-e2e"
 PREFIX = re.sub(r"^https?://[^/]+", "", BASE).rstrip("/")
+# #31: checks judged by ci/h1_rules.py (gate.py L: "rebuild-menu"), loaded as r14/lib.py does
+_h1spec = importlib.util.spec_from_file_location("h1_rules", HERE.parent / "ci" / "h1_rules.py")
+h1 = importlib.util.module_from_spec(_h1spec)
+_h1spec.loader.exec_module(h1)
 
 
 def run_sections(want, table):

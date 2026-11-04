@@ -1,6 +1,9 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.FreeStyleProject;
+import hudson.model.User;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -10,9 +13,13 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
+import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlAnchor;
+import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlInput;
 import org.htmlunit.html.HtmlPage;
+import org.htmlunit.html.HtmlTextArea;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -154,7 +161,115 @@ public class ConfigUsabilityTest {
         assertEquals(48, BatchControlGlobalConfiguration.get().getPendingTimeoutHours(), "nothing may have changed");
     }
 
+    /**
+     * T-CFG-15 (SPEC 3 job property: {@code approvalRequired}, the job's own approver list;
+     * SPEC 6 {@code blockTimer}, {@code blockUpstream}, {@code allowedUpstreamJobs}; #31, e2e script
+     * rest-admin-screens.sh): the administrator opens a job's configuration page. Its form offers the
+     * three switches as checkboxes and the job approver and allowed upstream lists as fields, each
+     * showing the stored value (approvalRequired, blockTimer and blockUpstream ticked; approver
+     * {@code admin}; upstream {@code feeder}). Unticking approvalRequired, adding {@code manager} to
+     * the approvers and {@code other-feeder} to the upstream list and saving stores exactly that, and
+     * leaves the two other switches on. A field that is not rendered, not pre-filled or not bound
+     * fails this row.
+     */
+    @Test
+    public void t_cfg_15_jobConfigurationFormOffersAndSavesTheBatchControlFields() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setRunControlEnabled(true);
+        cfg.setApprovers(Arrays.asList("admin", "manager"));
+        cfg.save();
+        User.getById("manager", true);
+        j.createFreeStyleProject("feeder");
+        j.createFreeStyleProject("other-feeder");
+        FreeStyleProject job = j.createFreeStyleProject("form-job");
+        BatchControlJobProperty stored = new BatchControlJobProperty(true);
+        stored.setBlockTimer(true);
+        stored.setBlockUpstream(true);
+        stored.setJobApprovers(Arrays.asList("admin"));
+        stored.setAllowedUpstreamJobs(Arrays.asList("feeder"));
+        BatchControlFixtures.setBatchControl(job, stored);
+
+        HtmlForm form = j.createWebClient().login("admin").getPage(job, "configure").getFormByName("config");
+        for (String box : new String[] {"approvalRequired", "blockTimer", "blockUpstream"}) {
+            HtmlCheckBoxInput checkbox = checkbox(form, box);
+            assertNotNull(checkbox, "the job configuration form must offer the " + box + " checkbox");
+            assertTrue(checkbox.isChecked(), "the " + box + " checkbox must show the stored value (on)");
+        }
+        for (String field : new String[] {"jobApproversText", "allowedUpstreamJobsText"}) {
+            assertTrue(UsabilityFixtures.hasField(form, field), "the job configuration form must offer the " + field + " field");
+        }
+        assertEquals(List.of("admin"), lines(fieldValue(form, "jobApproversText")), "the approver field must show the stored approver");
+        assertEquals(List.of("feeder"), lines(fieldValue(form, "allowedUpstreamJobsText")), "the upstream field must show the stored job");
+
+        checkbox(form, "approvalRequired").setChecked(false);
+        setList(form, "jobApproversText", "admin", "manager");
+        setList(form, "allowedUpstreamJobsText", "feeder", "other-feeder");
+        Page saved = j.submit(form);
+        assertTrue(saved.getWebResponse().getStatusCode() < 400, "the administrator's save must succeed, got HTTP "
+                + saved.getWebResponse().getStatusCode());
+
+        FreeStyleProject reloaded = j.jenkins.getItemByFullName("form-job", FreeStyleProject.class);
+        assertEquals(1, reloaded.getProperties().values().stream().filter(p -> p instanceof BatchControlJobProperty).count(),
+                "the saved job must carry exactly one Batch Control property");
+        BatchControlJobProperty property = reloaded.getProperty(BatchControlJobProperty.class);
+        assertFalse(property.isApprovalRequired(), "the unticked approvalRequired must be saved");
+        assertTrue(property.isBlockTimer(), "blockTimer must stay on");
+        assertTrue(property.isBlockUpstream(), "blockUpstream must stay on");
+        assertEquals(List.of("admin", "manager"), property.getJobApprovers(), "the approver field must be saved");
+        assertEquals(List.of("feeder", "other-feeder"), property.getAllowedUpstreamJobs(), "the upstream field must be saved");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static HtmlCheckBoxInput checkbox(HtmlForm form, String field) {
+        for (DomElement element : form.getElementsByTagName("input")) {
+            String name = element.getAttribute("name");
+            if (element instanceof HtmlCheckBoxInput box && (name.equals("_." + field) || name.endsWith("." + field) || name.equals(field))) {
+                return box;
+            }
+        }
+        return null;
+    }
+
+    private static DomElement field(HtmlForm form, String field) {
+        for (String tag : new String[] {"textarea", "input"}) {
+            for (DomElement element : form.getElementsByTagName(tag)) {
+                String name = element.getAttribute("name");
+                if (name.equals("_." + field) || name.endsWith("." + field) || name.equals(field)) {
+                    return element;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String fieldValue(HtmlForm form, String name) {
+        DomElement element = field(form, name);
+        assertNotNull(element, "the form must carry " + name);
+        return element instanceof HtmlTextArea area ? area.getText() : ((HtmlInput) element).getValue();
+    }
+
+    /** Fills a list field: one entry per line in a text area, comma-separated in a one-line input. */
+    private static void setList(HtmlForm form, String name, String... entries) {
+        DomElement element = field(form, name);
+        assertNotNull(element, "the form must carry " + name);
+        if (element instanceof HtmlTextArea area) {
+            area.setText(String.join("\n", entries));
+        } else {
+            ((HtmlInput) element).setValue(String.join(", ", entries));
+        }
+    }
+
+    private static List<String> lines(String value) {
+        List<String> out = new ArrayList<>();
+        for (String entry : value.split("[,\\r\\n]+")) {
+            if (!entry.isBlank()) {
+                out.add(entry.trim());
+            }
+        }
+        return out;
+    }
+
 
     private static final Pattern CONFIG_CAPTION = Pattern.compile("(?i)(configur|settings)");
 

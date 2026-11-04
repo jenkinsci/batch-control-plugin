@@ -1,0 +1,52 @@
+# Gap H3: the controller of the upgrade unit (h3/upgrade.py), a stack of its own next to the shard's.
+#
+#   BC_H3_HPI=<absolute path of an .hpi> BC_H3_PORT=18180 \
+#     docker compose -p bc-h3-local -f h3/compose.yml up -d
+#
+# * Its own compose project (h3/upgrade.py: bc-h3-<shard>), container and JENKINS_HOME volume (<project>_h3_home):
+#   nothing of the shard's Jenkins (docker-compose.yml) is shared, so the unit needs no `last` and leaves the shard's
+#   controller untouched; upgrade.py removes the stack and its volume at its end (BC_KEEP=1 keeps them).
+# * The same image as docker-compose.yml (the core of pom.xml, the plugins of plugins.txt): ci/run.sh has built it
+#   before any step runs; standalone, `up` builds it from ../Dockerfile.
+# * BC_H3_HPI is the plugin under test, mounted as the reference override as in docker-compose.yml (see the comment
+#   there for why not straight into plugins/). Phase A mounts the released .hpi, phase B re-creates the container with
+#   the .hpi of this build on the same volume: jenkins.sh copies the override over plugins/batch-control.jpi at boot.
+# * No init.groovy.d and a JCasC profile with the accounts only (h3/casc/jenkins.yaml): JCasC re-applies at every
+#   boot, so it must not own anything the upgrade has to carry over (the authorization strategy, the Batch Control
+#   configuration, the executors). Those are written in phase A by the released plugin, through the UI and REST.
+# * No mail sink (e-mail notifications stay off) and no JaCoCo agent (the shard's coverage is the shard's controller).
+name: bc-h3
+
+services:
+  jenkins:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: batch-control-e2e-jenkins:2.568.3
+    container_name: ${BC_H3_PROJECT:-bc-h3-local}-jenkins
+    restart: "no"
+    mem_limit: 2560m
+    # A clean shutdown saves the queue (the approved run waiting in it) before the container is re-created.
+    stop_grace_period: 180s
+    ports:
+      - "${BC_H3_PORT:-18180}:8080"
+    environment:
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Xmx1536m
+        -Dhudson.model.DownloadService.noSignatureCheck=true
+        -Duser.timezone=${TZ:-Asia/Seoul}
+        -Duser.language=en
+      TZ: "${TZ:-Asia/Seoul}"
+      CASC_JENKINS_CONFIG: /var/jenkins_casc/jenkins.yaml
+      BC_ADMIN_PASSWORD: "${BC_ADMIN_PASSWORD:?set BC_ADMIN_PASSWORD in e2e/.env}"
+      BC_APPROVER_PASSWORD: "${BC_APPROVER_PASSWORD:?set BC_APPROVER_PASSWORD in e2e/.env}"
+      BC_REQUESTER_PASSWORD: "${BC_REQUESTER_PASSWORD:?set BC_REQUESTER_PASSWORD in e2e/.env}"
+      BC_JENKINS_URL: "http://localhost:${BC_H3_PORT:-18180}/"
+    volumes:
+      - h3_home:/var/jenkins_home
+      - ./casc:/var/jenkins_casc:ro
+      - ${BC_H3_HPI:?set BC_H3_HPI to the absolute path of the plugin under test}:/usr/share/jenkins/ref/plugins/batch-control.jpi.override:ro
+
+volumes:
+  h3_home:

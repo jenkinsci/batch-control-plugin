@@ -179,6 +179,13 @@ jobs:
           fc-cache -f >/dev/null
           echo "system-ui -> $(fc-match system-ui)"
           echo "sans-serif -> $(fc-match sans-serif)"
+      # The released .hpi for the h3-upgrade unit (e2e/h3/upgrade.py downloads it into this directory when missing
+      # and always verifies its pinned sha256, cached or not).
+      - name: Cache the released hpi
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: e2e/ci/.cache/released
+          key: batch-control-hpi-1414.vc347803c1997
       # pytest, one test per step (JUnit XML in e2e/ci/out/<k>/junit.xml, Playwright traces of failed steps in
       # e2e/ci/out/<k>/traces/). Exit 1: a step failed; exit 2: the stack did not start (e2e/ci/run.sh).
       - name: Run shard ${{ matrix.shard }} of ${{ matrix.of }} (${{ matrix.label }})

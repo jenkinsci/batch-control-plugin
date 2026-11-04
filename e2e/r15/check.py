@@ -3,8 +3,10 @@ of its branch jobs, plus the DEF-08 job pages, for a new-job-page user and a cla
 
 Per (account, flag, page): every link and button in the side panel, app bar, breadcrumbs, tab bar and main panel,
 including dropdown templates (overflow menu, breadcrumb menus). Checks: no anchor with an empty/missing href, no
-duplicate visible entry in the side panel or app bar, every same-origin href answers < 400 to a GET with the
-account's own session (POST-only links are recorded, not fetched; /logout is never fetched), no console error, no
+duplicate visible entry in the side panel or app bar (outside core's build history, Build Queue and Build Executor
+Status widgets, whose entries repeat by design: ci/h1_rules.py r15_duplicates), every same-origin href answers < 400
+to a GET with the account's own session (core's stop buttons in those widgets may answer 405, ci/h1_rules.py
+r15_core_stop; POST-only links are recorded, not fetched; /logout is never fetched), no console error, no
 response >= 400 while loading. Anchors with an empty href are clicked to see whether they do anything.
 
 Usage: check.py crawl            (requester, admin x flag true/false; approver-1 404 check)
@@ -15,6 +17,7 @@ import re
 import sys
 from urllib.parse import urljoin, urlparse
 
+import lib
 from lib import Session, close, log, api, groovy, BASE, opened, gone, react
 
 PAGES = ["/job/team-mb/batch-control-activation/",
@@ -36,7 +39,8 @@ COLLECT = r"""() => {
       buildNow: el.dataset.type === 'build-now',
       cls: el.className && el.className.baseVal === undefined ? el.className : '', post: el.dataset.post || el.dataset.callback || null,
       confirm: el.dataset.confirmationType || el.getAttribute('data-message') || null, type: el.getAttribute('type'),
-      inForm: !!el.closest('form')});
+      inForm: !!el.closest('form'),
+      widget: (w => w ? w.id : null)(el.closest('#side-panel #jenkins-build-history, #side-panel #jenkins-builds, #side-panel div.pane-frame#buildQueue, #side-panel div.pane-frame#executors'))});
   });
   document.querySelectorAll('template').forEach(t => {
     const host = t.parentElement;
@@ -50,6 +54,7 @@ COLLECT = r"""() => {
 
 # e2e-11 UX 2: the same line appears on the core job page /job/<job>/ itself for a new-job-page user (probe.py)
 KNOWN_CONSOLE = "Refused to execute script from"
+ROOT_PATH = urlparse(BASE).path.rstrip("/")  # the context path (/jenkins); stop URLs are matched relative to it
 KNOWN_GET_405 = re.compile(r"/(build|toggleCollapse|doDelete|reload|disable|enable)(\?.*)?$")
 
 
@@ -85,15 +90,9 @@ def check_page(s, user, flag, path):
                 problems.append({"kind": "empty_href", **e})
         if e["tag"] == "menu" and e["cls"] in ("ITEM", "") and not e["href"] and e["text"] and not e["post"]:
             problems.append({"kind": "menu_no_href", **e})
-    # duplicates in side panel / app bar
-    for reg in ("side", "appbar"):
-        seen = {}
-        for e in els:
-            if e["region"] == reg and e["visible"] and e["text"]:
-                seen[e["text"]] = seen.get(e["text"], 0) + 1
-        for t, n in seen.items():
-            if n > 1:
-                problems.append({"kind": "duplicate", "region": reg, "text": t, "count": n})
+    # duplicates in side panel / app bar, outside core's repeating widgets (ci/h1_rules.py r15_duplicates)
+    dups, row["widget_duplicates"] = lib.h1.r15_duplicates(els)
+    problems += dups
     # fetch every same-origin href
     fetched = {}
     base_host = urlparse(BASE).netloc
@@ -117,7 +116,10 @@ def check_page(s, user, flag, path):
         st = fetched[u]
         if isinstance(st, int) and st >= 400:
             path_ = urlparse(u).path
-            kind = ("known_core_get_405" if st == 405 and KNOWN_GET_405.search(path_) else
+            pu = urlparse(u)
+            root = pu.path[len(ROOT_PATH):] if pu.path.startswith(ROOT_PATH + "/") else pu.path
+            stop = lib.h1.r15_core_stop(e, root + ("?" + pu.query if pu.query else ""), st)  # core's widget stop buttons
+            kind = stop or ("known_core_get_405" if st == 405 and KNOWN_GET_405.search(path_) else
                     "known_core" if (st == 404 and (path_.endswith("/toggleCollapse") or path_.endswith("/ws/"))) else "link_status")
             problems.append({"kind": kind, "text": e["text"], "region": e["region"], "url": u, "status": st})
     row["links_fetched"] = len(fetched)

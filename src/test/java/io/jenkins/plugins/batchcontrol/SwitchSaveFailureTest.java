@@ -270,8 +270,10 @@ public class SwitchSaveFailureTest {
     /**
      * T-08-66 (D-63, backlog #85): admin turns change control off on the global form while u1 holds
      * an active window; the GRANT_REVOKE record for that window states "change control turned off",
-     * and the grants screen (opened by admin once change control is back on) shows that reason.
-     * Guard: an ordinary revoke by admin of another window leaves a GRANT_REVOKE record without it.
+     * and the grants screen (opened by admin once change control is back on) shows that reason; the
+     * closed window's own Ended row gives the reason and names who turned change control off
+     * ("by admin", D-63 revokedBy). Guard: an ordinary revoke by admin of another window leaves a
+     * GRANT_REVOKE record without it, and its Ended row names admin without that reason.
      */
     @Test
     public void t_08_66_changeControlOffRevocationSaysSo() throws Exception {
@@ -307,6 +309,39 @@ public class SwitchSaveFailureTest {
         assertTrue(text.contains(grant.getId()), "premise: the closed window " + grant.getId() + " is listed");
         assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
                 "the grants screen must show that the window was revoked because change control was turned off");
+
+        // the same Ended row names the reason and who turned change control off (D-63 revokedBy; r9/s85.py)
+        org.htmlunit.html.HtmlPage list = (org.htmlunit.html.HtmlPage) grants;
+        String closed = endedRowText(list, grant.getId());
+        assertTrue(closed.toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
+                "the closed window's own Ended row must give the reason: " + closed);
+        assertTrue(BY_ADMIN.matcher(closed).find(), "the closed window's own Ended row must name who turned change control off"
+                + " (\"by admin\"): " + closed);
+        // guard: the ordinary revoke's row names its actor without the switch's reason, so the reason is per row
+        String manualRow = endedRowText(list, other.getId());
+        assertTrue(BY_ADMIN.matcher(manualRow).find(), "guard: the ordinarily revoked window's row names admin: " + manualRow);
+        assertFalse(manualRow.toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
+                "guard: the ordinarily revoked window's row must not claim change control was turned off: " + manualRow);
+    }
+
+    private static final java.util.regex.Pattern BY_ADMIN = java.util.regex.Pattern.compile("\\bby admin\\b");
+
+    /**
+     * The text of the one row of the grants list's Ended table that carries {@code grantId} (as text
+     * or in a link), whitespace collapsed.
+     */
+    private static String endedRowText(org.htmlunit.html.HtmlPage list, String grantId) {
+        List<String> rows = new java.util.ArrayList<>();
+        for (org.htmlunit.html.DomNode table : list.querySelectorAll(WindowStateFixtures.ENDED_LIST)) {
+            for (org.htmlunit.html.DomNode row : table.querySelectorAll("tr")) {
+                if (row.querySelector("tr") == null && row.asXml().contains(grantId)) {
+                    rows.add(row.asNormalizedText().replaceAll("\\s+", " "));
+                }
+            }
+        }
+        assertEquals(1, rows.size(), "the Ended table must hold one row for the window " + grantId + ", got " + rows + ": "
+                + ApproverFormFixtures.excerpt(list.asNormalizedText()));
+        return rows.get(0);
     }
 
     /** A second approved window (CONFIGURE on job other-x) for u1. */

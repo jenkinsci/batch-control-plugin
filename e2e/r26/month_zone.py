@@ -36,6 +36,7 @@ import datetime
 import re
 import secrets
 import sys
+import urllib.parse
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
@@ -47,6 +48,7 @@ VIEWER = "auditor"
 TAG = secrets.token_hex(2)
 NAME = {k: f"r26-zone-{k}-{TAG}" for k in ("west", "east", "mid")}
 FIXTURE = re.compile(rf"\br26-zone-(west|east|mid)-{TAG}\b")
+MAX_PAGES = 20  # the pages listing() follows through "Older" before it fails
 S = {}
 
 
@@ -105,13 +107,31 @@ return 'appended'""")
 
 
 def listing(kind, frm, to, shot):
-    """The fixture names in the table rows of the History listing as the auditor sees it (a new browser context)."""
+    """The fixture names in the table rows of every page of the History listing as the auditor sees it (a new browser
+    context), the status of page 1 and the page numbers read. The listing shows 50 rows a page, and on the first days of
+    a month the shard's own records of today share the date range with the fixture, so the later pages are reached
+    through the listing's own "Older" link, as a user pages (each click waits for its navigation; the page= of the new
+    URL must be the previous page plus one); more than MAX_PAGES pages or a skipped or repeated page raises (a FAIL,
+    never a silent cut)."""
     s = Session(VIEWER, fresh=True)
     try:
         r = s.go(f"/batch-control/history/?kind={kind}&from={frm}&to={to}")
-        rows = s.page.locator("tr").all_inner_texts()
+        rows, pages = s.page.locator("tr").all_inner_texts(), [1]
         s.shot("#main-panel", shot)
-        return (r.status if r else None), sorted({m.group(0) for t in rows for m in FIXTURE.finditer(t)})
+        older = s.page.get_by_role("navigation", name="Pages of history records").get_by_role("link", name="Older",
+                                                                                              exact=True)
+        while older.count():
+            if len(pages) >= MAX_PAGES:
+                raise RuntimeError(f"the {kind} listing for {frm}..{to} still offers Older after {pages} pages "
+                                   f"({s.page.url})")
+            with s.page.expect_navigation(wait_until="load"):
+                older.click()
+            n = int(dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(s.page.url).query)).get("page", 0))
+            if n != pages[-1] + 1:
+                raise RuntimeError(f"Older on page {pages[-1]} of the {kind} listing led to page {n} ({s.page.url})")
+            pages.append(n)
+            rows += s.page.locator("tr").all_inner_texts()
+        return (r.status if r else None), sorted({m.group(0) for t in rows for m in FIXTURE.finditer(t)}), pages
     finally:
         s.done()
 
@@ -122,21 +142,23 @@ def exported(kind, frm, to):
 
 
 def surfaces(frm, to, shot):
-    """Which fixture names each of the four surfaces lists for the days frm..to; the HTTP status of each."""
-    out, codes = {}, {}
+    """Which fixture names each of the four surfaces lists for the days frm..to; the HTTP status of each; the pages read
+    of each listing."""
+    out, codes, pages = {}, {}, {}
     for kind in ("runs", "changes"):
-        codes[f"{kind} listing"], out[f"{kind} listing"] = listing(kind, frm, to, f"{shot}-{kind}")
+        codes[f"{kind} listing"], out[f"{kind} listing"], pages[f"{kind} listing"] = listing(kind, frm, to,
+                                                                                            f"{shot}-{kind}")
         codes[f"{kind}.csv"], out[f"{kind}.csv"] = exported(kind, frm, to)
-    return out, codes
+    return out, codes, pages
 
 
 def on_all(sec, key, frm, to, want, what, shot):
-    got, codes = surfaces(frm, to, shot)
+    got, codes, pages = surfaces(frm, to, shot)
     wrong = [s for s, names in got.items() if (NAME[key] in names) != want]
     span = frm if frm == to else f"{frm}..{to}"
     check(sec, f"{what}: for {span} {NAME[key]} is {'' if want else 'not '}listed on the runs listing, runs.csv, the "
           "changes listing and changes.csv", not wrong and all(c == 200 for c in codes.values()),
-          wrong_on=wrong, http=codes, listed=got, zone=S.get("zone_now"))
+          wrong_on=wrong, http=codes, listed=got, pages=pages, zone=S.get("zone_now"))
 
 
 def move(sec, zone):
@@ -172,9 +194,9 @@ def sec_W():
           "at their instants", all(v["created"] == 200 and v["run"] == "appended" and v["clock_after"] == a
                                    and v["clock"].startswith(str(t[k])) for k, v in w.items()), written=w)
     d = day(t["west"], a)
-    got, codes = surfaces(d, d, "R26-33-W-premise")
+    got, codes, pages = surfaces(d, d, "R26-33-W-premise")
     check("W", f"premise (zone {a}): for {d} the four surfaces list {NAME['west']} (stored and readable where it was "
-          "written)", all(NAME["west"] in v for v in got.values()), listed=got, http=codes)
+          "written)", all(NAME["west"] in v for v in got.values()), listed=got, http=codes, pages=pages)
     note("W", "the month files that hold the west records (the bucket is the plugin's choice)",
          files=lib.sh(f"grep -l {NAME['west']} {lib.STORE}/runs/*.jsonl {lib.STORE}/changes/*.jsonl; true")[1].split())
 

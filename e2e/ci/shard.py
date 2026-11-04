@@ -257,8 +257,8 @@ UNITS = [
     # the 2026-10-08 local runs (arrangement included), calibrated against CI (above).
     Unit("r19-gate", 1.5, [("r19-arrange", py("r19/arrange.py")), ("r19-gate", py("r19/gate.py"))],
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
-             "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
-             "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+             "Replay, Rebuild, #31: Rebuild Last from the new job page's More actions), the job page notice, an approved "
+             "run exactly once with exact values, Cause on the build page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
     # e2e-24 #37 (wave A). r24/user_cause.py deletes and re-creates its own items (r24-ucause*) and activates one through
     # an approved ACTIVATE request; the deprecated cause is submitted from the script console and the CLI groovy command.
     Unit("r24-user-cause", 1.6, [("r24-user-cause", py("r24/user_cause.py"))], group="runs and switches",
@@ -281,9 +281,13 @@ UNITS = [
     Unit("r19-triggers", 6.0, [("r19-arrange", py("r19/arrange.py")), ("r19-triggers", py("r19/triggers.py"))],
          doc="e2e-19: a real cron schedule (blockTimer, TRIGGER_BLOCKED coalescing, activation, hold) and a real "
              "parameterized-trigger upstream (blockUpstream, allow list) (SPEC 6, 6a)"),
-    Unit("r19-lifecycle", 2.5, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
+    # Section M (gap M11, 2026-10-31: the EXPIRING, INVALIDATED and run APPROVED mails) waits for two passes of the
+    # plugin's one-minute periodic work: 97 s on a fresh stack through ci/run.sh (local, 2026-11-01; lifecycle step 213 s
+    # with M), real time that does not shrink on the runner, so the weight went from 2.5 to 4.1.
+    Unit("r19-lifecycle", 4.1, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
          doc="e2e-19: request form validation, decision and cancel rules, approver change, self-approval, approved-run "
-             "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12)"),
+             "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12); the "
+             "EXPIRING reminder exactly once, INVALIDATED and run APPROVED mails (SPEC 13, gap M11)"),
     # e2e-22 R2-05 (bug-hunt batch B). r22/cancelled_notice.py arranges its own items (r22-cancelq, r22-cancelq-dis).
     Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
          doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "
@@ -437,9 +441,12 @@ UNITS = [
              "and changes listings and in runs.csv/changes.csv after the controller restarts in another zone (both "
              "directions); the neighbouring day does not list them"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
-    Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
+    # #31 added section D (r6/s5c.py's destructive controls and dialogs, judged by ci/h1_rules.py "destructive").
+    Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGAD"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
-             "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
+             "var(--destructive-color) (computed colour vs a probe), the Approve button does not; #31: Cancel Request on "
+             "the three request pages and Revoke on the grants list and the window page are red and open a red "
+             "confirmation dialog whose Cancel changes nothing"),
     # e2e-27 D1 (Wave D, #18.4 and #18.7). r27/titles_revert.py arranges its own items (folder r27-d1, r27-d1-top-*, the
     # vault folder r27-d1-vault only administrators read, the multibranch project r27-d1/mb over repos/r27-d1.git, a
     # copy of the seed's repository with one more branch), files one window request on the seed's team-mb and cancels it,
@@ -480,6 +487,19 @@ UNITS = [
     Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],
          doc="e2e-22 R3-04: while another thread holds the GrantService monitor, the requester's job lists and an item "
              "answer at once with the baseline content and no permission check is BLOCKED on it (T-08-196 end to end)"),
+    # Gap H3 (upgrade from the released plugin). h3/upgrade.py starts a controller of its own (h3/compose.yml: own compose
+    # project bc-h3-<shard>, container, JENKINS_HOME volume and port BC_PORT + 100) with the released .hpi (pinned sha256,
+    # BC_RELEASED_HPI or downloaded into ci/.cache/released/), makes data there, re-creates it with target/batch-control.hpi
+    # on the same volume and removes it at its end. It never touches the shard's Jenkins, so it is not `last` (every group
+    # already has one). Group: the restart theme of "job ui params and restart". Weight: 97 s in a shard through ci/run.sh
+    # next to the shard's Jenkins, 113 and 130 s alone (2026-10-31, local); most of it is two controller boots and two
+    # waits for a cron minute (up to 60 s each), so 2.5 leaves room for a slower runner.
+    Unit("h3-upgrade", 2.5, [("h3-upgrade", py("h3/upgrade.py"))], group="job ui params and restart",
+         doc="gap H3: a controller upgraded from batch-control 1414.vc347803c1997 to this build loads its data (plugin "
+             "active at the new version, no XStream/class error or Batch Control warning in the log, no old-data entry; "
+             "strategy, configuration, every request, window, activation, incident, page status and CSV row as before) "
+             "and keeps working: the queued approved run starts once, the activated cron job's timer fires after the "
+             "upgrade (SPEC 6a), the pending request runs, the window still confers, pending requests can be decided"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
@@ -696,17 +716,14 @@ def r15_rows(before):
 
 
 # r15/check.py writes "ok": false as a hint for the reviewer (e2e-15 judged each row). The runner judges a row from its
-# data, leaving out exactly these known or provoked items (everything else still fails):
-BUILD_HISTORY = re.compile(r"^(Success|Failed|Unstable|Aborted|Not built|In progress|Pending)$")
-
-
+# data, leaving out exactly these known or provoked items (everything else still fails). Repeats inside core's
+# side-panel widgets (build history, Build Queue, Build Executor Status) are not duplicate problems at all: check.py
+# leaves them out by DOM containment (ci/h1_rules.py r15_duplicates), not by their text.
 def r15_problems(row):
     left = []
     for p in row.get("problems", []):
         if p.get("kind", "").startswith("known_core"):
             continue  # r15/check.py's own classification (core GET 405/404, e2e-15 Known)
-        if p.get("kind") == "duplicate" and p.get("region") == "side" and BUILD_HISTORY.match(p.get("text", "")):
-            continue  # the classic side panel's build history widget: one status label per build
         left.append(p)
     provoked = row.get("step") == "submit"  # the empty submit first: the form re-renders with errors as HTTP 400
     bad = [b for b in row.get("bad_responses", []) if not (provoked and re.match(r"400 POST .*/batch-control-activation/submit", b))]

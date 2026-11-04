@@ -25,6 +25,7 @@ Standard library only: ci/selftest_h1.py feeds it recorded rows without Jenkins 
 import json
 import re
 from collections import Counter
+from datetime import datetime
 
 URL = re.compile(r"https?://[^\s'\"<>)]+")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -290,9 +291,45 @@ MISC_STATUS = {
     ("M", "page"): {"admin": 200, "requester": 200, "approver-1": 404, "manager": 200},
     ("M", "mark_button"): {"admin": 1, "requester": 0, "manager": 0},
 }
-# misc.py P: lists that grow at their top while the pager is walked (page -> how far page 1's first row may move down:
-# the timer runs of a few seconds, two jobs every minute)
-GROWING_LISTS = {"/batch-control/history/?kind=runs": 5}
+# misc.py P: newest-first lists that grow at their top while the pager is walked (the timer runs finishing meanwhile).
+# On these, Previous may bring page 1 back with its first row moved down, but only below rows that are newer than it
+# or of the same second by the table's time column (see _shift_ok); no fixed row limit. Every other paged list restores exactly.
+GROWING_LISTS = {"/batch-control/history/?kind=runs"}
+def _shown_time(text):
+    """A time cell as the plugin shows it (ui/Dates.java: "yyyy-MM-dd HH:mm:ss z") -> (datetime, zone), else None."""
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\S+)", (text or "").strip())
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"), m.group(2)
+    except ValueError:
+        return None
+
+
+def _shift_ok(pv):
+    """Previous on a growing list: page 1's first row is back on page 1 at index k >= 0 and each of the k rows above it
+    is newer than it or of the same second by the time column (same zone; the list is sorted by start time descending,
+    so an equal time at second resolution is a correct order; older, unparseable or missing times fail). A first row
+    pushed off page 1 altogether fails: more new rows than a page holds in a few seconds is not expected, and judging
+    it would need page 2 read too."""
+    if pv.get("first_row_restored"):
+        return True  # k == 0 (also the records from before first_row_at was recorded)
+    k = pv.get("first_row_at")
+    if not isinstance(k, int) or isinstance(k, bool) or k < 0:
+        return False
+    if k == 0:
+        return True
+    above = pv.get("above_times")
+    first = _shown_time(pv.get("first_row_time"))
+    if first is None or not isinstance(above, list) or len(above) != k:
+        return False
+    for t in above:
+        a = _shown_time(t)
+        if a is None or a[1] != first[1] or not a[0] >= first[0]:
+            return False
+    return True
+
+
 # the Batch Control breadcrumb menu per role (SPEC 2: a tab only for a user who may open its section)
 _TABS = ["Overview", "Run Requests", "Activations", "Grants"]
 _HIST = _TABS + ["Changes", "Dashboard", "Incidents", "History"]
@@ -381,6 +418,24 @@ def transient_widget_entry(r, res, target):
             and bool(TRANSIENT_TARGET.fullmatch(target or "")))
 
 
+def design_refs(j, r, base, ctx):
+    """#31 (the retired r6/s6.py): no internal design reference ("SPEC item", "D-61", ...) on a page a user sees.
+    r14/crawl.py's CONTENT_JS scans every page below 400 (and again behind Advanced) and puts the scan on the row as
+    "design" = {texts, skipped, refs, type}. Each ref FAILS design-ref; a row without the scan, or an HTML document
+    (type text/html, or no type) whose scan read no text, FAILS design-ref-measured (the measurement is required). A
+    document of another type (the JSON of /batch-control/history/summary, shown by Chromium inside a <pre>) is data, not
+    UI copy, and needs no scanned text. Only selftest_h1.py's replay of rows recorded before #31 passes ctx
+    pre31_design_ref."""
+    d = r.get("design")
+    html = isinstance(d, dict) and (d.get("type") or "text/html") in ("text/html", "application/xhtml+xml")
+    if not (ctx or {}).get("pre31_design_ref") and (not isinstance(d, dict) or (html and not d.get("texts"))):
+        j.fail("design-ref-measured", dict(base, kind=r.get("kind"), design="missing" if d is None else "no text scanned",
+                                           type=d.get("type") if isinstance(d, dict) else None))
+    refs = (d.get("refs") or []) if isinstance(d, dict) else []
+    for x in refs:
+        j.fail("design-ref", dict(base, match=x.get("match")), x)
+
+
 def judge_crawl(rows, ctx):
     j = Judge("crawl", ctx)
     ids, prefix, profile = ctx.get("ids") or {}, ctx.get("prefix", ""), ctx.get("profile", "matrix")
@@ -397,6 +452,10 @@ def judge_crawl(rows, ctx):
             if r.get("status") != want:
                 j.fail("page-status", dict(base, status=r.get("status"), expected=want, rule=rid))
             j.console("page-console", r.get("console"), base)
+            if (r.get("status") or 0) < 400:  # #31: the crawl scans every page it does not leave at its 4xx status
+                design_refs(j, r, base, ctx)
+        elif kind == "advanced":
+            design_refs(j, r, base, ctx)
         elif kind in ("link", "post-form"):
             target = page_key(r.get("target") or "", ids, prefix)
             if res == "BROKEN":
@@ -632,11 +691,12 @@ def judge_misc(rows, ctx=None):
                 nx, pv = r.get("next") or {}, r.get("prev")
                 # the run history is newest first and gains a row with every timer run (batch-cron and fast run every
                 # minute) while Next and Previous are walked: Previous is right when it brings back page 1 with its
-                # first row moved down by the runs that finished meanwhile (a few; a broken Previous shows page 2,
-                # where page 1's first row is not). Only that list; every other paged list must restore its first row.
-                moved = (r.get("page") in GROWING_LISTS and isinstance(pv, dict)
-                         and isinstance(pv.get("first_row_at"), int) and 0 < pv["first_row_at"] <= GROWING_LISTS[r["page"]])
-                if not nx.get("first_row_changed") or not isinstance(pv, dict) or not (pv.get("first_row_restored") or moved):
+                # first row moved down only by rows not older than it (the runs that finished meanwhile; a broken Previous
+                # shows page 2, where page 1's first row is not, or older rows). Only those lists; every other paged
+                # list must restore its first row exactly.
+                ok = isinstance(pv, dict) and (_shift_ok(pv) if r.get("page") in GROWING_LISTS
+                                               else bool(pv.get("first_row_restored")))
+                if not nx.get("first_row_changed") or not ok:
                     j.fail("P-paging", {"page": r.get("page"), "next": nx, "prev": pv})
         elif sec == "B":
             want = MISC_STATUS[("B", r.get("page"))].get(role)
@@ -712,6 +772,68 @@ def judge_misc(rows, ctx=None):
 
 
 # ------------------------------------------------------------------ targeted (errpages, listpager, incident, help, monitor)
+def incident_m4(r):
+    """M4 (gap audit 2026-10, SPEC 11): the incident's state machine through its browser forms, as s_incident.py records
+    it for one role. Returns {field: value} of what is wrong ({} when all holds): before anything is pressed the Status
+    row says Open, the page offers Acknowledge and Add Comment but no Resolve, and the store says OPEN; Add Comment
+    answers 200, keeps the status and adds a History row by the role with the comment; Acknowledge answers 200, the
+    Status row says Acknowledged, Acknowledge is gone and Resolve offered, the store says ACKNOWLEDGED; Resolve answers
+    200, the store says RESOLVED and the History ends with the Acknowledged and Resolved rows by the role with their
+    comments."""
+    role, comment = r.get("role"), f"comment by {r.get('role')} e2e-12"
+    before, after_ack = r.get("forms_before") or [], r.get("after_ack_forms") or []
+    hist_c, hist_r = r.get("history_after_comment") or [], r.get("history_after_resolve") or []
+    want = {
+        "state_before": r.get("state_before") == "Open",
+        "forms_before": "acknowledge" in before and "addComment" in before and "resolve" not in before,
+        "stored_before": r.get("stored_before") == "OPEN",
+        "comment_status": r.get("comment_status") == 200,
+        "state_after_comment": r.get("state_after_comment") == "Open",
+        "history_after_comment": any(len(h) == 3 and h[1] == role and h[2] == comment for h in hist_c),
+        "ack_status": r.get("ack_status") == 200,
+        "state_after_ack": r.get("state_after_ack") == "Acknowledged",
+        "after_ack_forms": "acknowledge" not in after_ack and "resolve" in after_ack,
+        "stored_after_ack": r.get("stored_after_ack") == "ACKNOWLEDGED",
+        "resolve_status": r.get("resolve_status") == 200,
+        "stored_after_resolve": r.get("stored_after_resolve") == "RESOLVED",
+        "history_after_resolve": hist_r[-2:] == [["Acknowledged", role, "ack"], ["Resolved", role, "resolved e2e-12"]],
+    }
+    return {k: r.get(k) for k, ok in want.items() if not ok}
+
+
+# #31 E2E-D4: the global configuration pages helpcheck.py must measure (its LAYOUT_PAGES)
+LAYOUT_PAGES = ("/manage/batch-control-configuration/", "/manage/configure")
+
+
+def monitor_def04(j, r):
+    """#31 DEF-04 (docs/reports/e2e-06.md): on both /manage/ visits the strategy monitor shows its arranged item; each
+    "Mark as reviewed" sits on the last line of its item's text (vertical centres within 2 px) right after it (gap 0..24
+    px, not floated to the right edge), the controls share one top (2 px), and the alert shows one icon outside its
+    buttons ("Before you install" once showed a second one) and no button more than one."""
+    if not (r.get("r31") or {}).get("listed"):
+        j.fail("def04-premise", {"r31": r.get("r31")})
+    for visit in ("layout_global", "layout_bc"):
+        lay = r.get(visit)
+        if not lay:
+            j.fail("def04-monitor-shown", {"visit": visit, "layout": lay})
+            continue
+        if visit == "layout_global" and not lay.get("before_install"):
+            j.fail("def04-before-install-shown", {"visit": visit})
+        measured = [m for m in lay.get("marks") or [] if not m.get("nested") and m.get("line")]
+        if not measured:
+            j.fail("def04-mark-measured", {"visit": visit, "marks": lay.get("marks")})
+        for m in measured:
+            if m.get("dy") is None or m["dy"] > 2 or m.get("gap") is None or not 0 <= m["gap"] <= 24:
+                j.fail("def04-mark-beside-item", {"visit": visit, "item": m.get("item")}, m)
+        tops = [c["box"][1] for c in lay.get("controls") or []]
+        if tops and max(tops) - min(tops) > 2:
+            j.fail("def04-controls-top", {"visit": visit, "controls": lay.get("controls")})
+        if lay.get("icons") != 1:
+            j.fail("def04-alert-icons", {"visit": visit, "icons": lay.get("icons"), "classes": lay.get("icon_classes")})
+        for b in lay.get("button_icons") or []:
+            j.fail("def04-button-icons", {"visit": visit, "button": b})
+
+
 def judge_targeted(name, rows, ctx=None):
     j = Judge(name, ctx)
     for r in rows:
@@ -728,14 +850,36 @@ def judge_targeted(name, rows, ctx=None):
             if r.get("case") == "rerun validation":
                 if r.get("status") != 400 or "Check at least one approver." not in (r.get("errors") or []):
                     j.fail("rerun-validation", {k: r.get(k) for k in ("status", "url", "errors")})
+                # M4 (2026-10-31): the refusal is the incident's own page again (Status row, the rerun form offered
+                # again) and links no rerun request. Rows recorded before M4 have no reruns_after and are not judged.
+                if "reruns_after" in r and (r.get("state_after_refusal") != "Open" or "rerun" not in (r.get("forms_after_refusal") or [])
+                                            or r.get("reruns_after") != r.get("reruns_before") or r.get("reruns_after") != []):
+                    j.fail("rerun-refusal-state", {k: r.get(k) for k in ("state_after_refusal", "forms_after_refusal",
+                                                                         "reruns_before", "reruns_after")})
             elif (r.get("comment_visible") is not True or "resolve" not in (r.get("after_ack_forms") or [])
                   or r.get("state_after_resolve") != "Resolved" or "resolve" in (r.get("forms_after_resolve") or ["resolve"])):
                 j.fail("incident", {k: r.get(k) for k in ("role", "comment_visible", "after_ack_forms", "state_after_resolve",
                                                           "forms_after_resolve")})
+            if r.get("case") != "rerun validation" and "state_before" in r:  # M4 (2026-10-31; rows before it: not judged)
+                bad = incident_m4(r)
+                if bad:
+                    j.fail("incident-m4", {"role": r.get("role"), "id": r.get("id"), "wrong": bad})
         elif name == "help":
             for h in r.get("helps") or []:
                 if h.get("status") != 200 or (h.get("chars") or 0) < 20 or h.get("expands") is not True:
                     j.fail("help", {"page": r.get("page"), "help": h})
+            # #31 E2E-D4: a label never overlaps or runs into its description/help text on the global configuration
+            # pages (helpcheck.py LAYOUT). Each page of LAYOUT_PAGES must carry a layout (checked after the rows); the
+            # section must be there with its labels and at least one label/text pair measured, so an empty page is no pass.
+            lay = r.get("layout")
+            if lay is not None:
+                if lay.get("sections", 0) < 1 or lay.get("labels", 0) < 10 or lay.get("pairs", 0) < 1:
+                    j.fail("label-layout-premise", {"page": r.get("page"),
+                                                    **{k: lay.get(k) for k in ("sections", "labels", "pairs")}})
+                for x in lay.get("overlap") or []:
+                    j.fail("label-description-overlap", {"page": r.get("page"), "label": x.get("label")}, x)
+                for x in lay.get("runin") or []:
+                    j.fail("label-description-same-line", {"page": r.get("page"), "label": x.get("label")}, x)
             j.console("console", r.get("console"), {"page": r.get("page")})
         elif name == "help2":
             if not (r.get("after", 0) > r.get("before", 0)):
@@ -751,7 +895,17 @@ def judge_targeted(name, rows, ctx=None):
             if n and (r.get("after_mark_cancel") != n or r.get("after_mark_ok") != n - 1
                       or [x for x in r.get("mark_links_on_page") or [] if x[1] >= 400]):
                 j.fail("mark-reviewed", {k: r.get(k) for k in ("mark_links", "after_mark_cancel", "after_mark_ok", "mark_links_on_page")})
+            monitor_def04(j, r)  # #31 DEF-04 (s_monitor.py MONITOR): required, a row without the measurement fails
             j.console("console", r.get("console"), {"page": "/manage/"})
+    if name == "help" and not (ctx or {}).get("pre31_layout"):
+        # #31 E2E-D4: the measurement is required; a driver change that drops it fails instead of passing silently.
+        # Only selftest_h1.py's replay of rows recorded before #31 passes pre31_layout (and lists it as skipped).
+        have = {r.get("page") for r in rows if r.get("layout") is not None}
+        for page in LAYOUT_PAGES:
+            if page not in have:
+                j.fail("label-layout-premise", {"page": page, "layout": "missing"})
+    if name == "monitor" and not rows:
+        j.fail("def04-monitor-shown", {"visit": None, "layout": "no monitor row"})
     return j
 
 
@@ -831,6 +985,59 @@ def judge_role(name, res, ctx=None):
 
 
 # ------------------------------------------------------------------ r15
+# r15/check.py's duplicate check (side panel, app bar). Core's side-panel widgets list one entry per build, queue item or
+# executor, so their texts repeat by design (CI run 40504779419: "Success" twice, the status badges of builds #1 and #2
+# in the build history): the build history card (hudson/widgets/HistoryWidget/index.jelly: l:card#jenkins-builds around
+# div#jenkins-build-history), the Build Queue pane (lib/hudson/queue.jelly, l:pane id="buildQueue") and the Build
+# Executor Status pane (lib/hudson/executors.jelly, div.pane-frame#executors). check.py's COLLECT records the id of the
+# enclosing one as "widget" (DOM containment, not the text); only core's markup is rendered there.
+R15_REPEATING_WIDGETS = frozenset({"jenkins-builds", "jenkins-build-history", "buildQueue", "executors"})
+
+
+def r15_duplicates(els, regions=("side", "appbar")):
+    """The duplicate problems of a page's collected elements: a visible text that appears more than once in a region,
+    counting only entries outside core's repeating widgets (task links of core and of the plugin, the app bar).
+    Returns (problems, widget_duplicates); the second lists the repeats inside the widgets, for the record only."""
+    problems, inside = [], []
+    for reg in regions:
+        seen, seen_w = {}, {}
+        for e in els:
+            if e.get("region") == reg and e.get("visible") and e.get("text"):
+                if e.get("widget") in R15_REPEATING_WIDGETS:
+                    k = (e["widget"], e["text"])
+                    seen_w[k] = seen_w.get(k, 0) + 1
+                else:
+                    seen[e["text"]] = seen.get(e["text"], 0) + 1
+        problems += [{"kind": "duplicate", "region": reg, "text": t, "count": n} for t, n in seen.items() if n > 1]
+        inside += [{"region": reg, "widget": w, "text": t, "count": n} for (w, t), n in seen_w.items() if n > 1]
+    return problems, inside
+
+
+# r15/check.py's GET of every same-origin href: core's stop buttons in those widgets (lib/layout/stopButton.jelly,
+# a.stop-button-link, posted by core's JS after its confirmation) answer 405 to a GET (CI run 40504779419: the
+# executors pane's "Cancel" of a running batch-cron build). Each pane's stop URL, relative to the Jenkins root:
+R15_CORE_STOP = (
+    ("buildQueue", re.compile(r"/queue/cancelItem\?id=\d+")),  # lib/hudson/queue.jelly
+    ("executors", re.compile(r"/computer/[^/?]+/(executors|oneOffExecutors)/\d+/stopBuild\?runExtId=[^&]*")),  # executors.jelly
+    ("jenkins-build-history", re.compile(r"(/job/[^/?]+)+/\d+/stop")),  # HistoryWidget/entry.jelly: ${link}stop
+)
+
+
+def r15_core_stop(e, path, status):
+    """The known-core kind of a fetched link of r15/check.py, or None (then a status >= 400 stays a problem): core's stop
+    button inside its own widget pane, on that pane's stop URL (full match of path + query), answering 405 to the GET;
+    or a one-off executor's stopBuild answering 404 (a flyweight executor exists only while its build runs)."""
+    if "stop-button-link" not in (e.get("cls") or "").split():
+        return None
+    for widget, rx in R15_CORE_STOP:
+        if e.get("widget") == widget and rx.fullmatch(path or ""):
+            if status == 405:
+                return "known_core_get_405"
+            if status == 404 and widget == "executors" and "/oneOffExecutors/" in path:
+                return "known_core"
+    return None
+
+
 def judge_r15(name, rows, ctx=None):
     j = Judge("r15", ctx)
     for r in rows:
@@ -894,6 +1101,171 @@ def _permalinks_entries(c):
 
 
 # ------------------------------------------------------------------ entry point for the drivers
+# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py)
+# The destructive controls section D measures: (where, control). Each must have a row (destructive-measured).
+DESTRUCTIVE_CONTROLS = (("run request", "Cancel Request"), ("permission window request", "Cancel Request"),
+                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"))
+
+
+def _painted(button, probe, probe_n):
+    """Whether a dialog button shows the probe's colour as its text, background or ::before background (core paints a
+    button's background on ::before). Raw computed values are compared, and the canvas-normalised "r,g,b,a" of each
+    (reject_color.py "n") with the probe's, so oklch(...) and rgb(...) of one colour match."""
+    if not probe:
+        return False
+    keys = ("color", "bg", "before_bg")
+    n = button.get("n") or {}
+    return probe in [button.get(k) for k in keys] or (bool(probe_n) and probe_n in [n.get(k) for k in keys])
+
+
+def judge_destructive(rows, ctx=None):
+    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"): Cancel Request on the three
+    request pages and Revoke on the grants list and on the window's page render in the theme's destructive colour and
+    open core's destructive confirmation dialog. Colours are compared with a probe styled color: var(--destructive-color)
+    on the same page (reject_color.py D):
+      * destructive-measured: every DESTRUCTIVE_CONTROLS entry has a row, and its probe resolves to a colour of its own
+        (it differs from the text around the control; an undefined variable would make every comparison vacuous);
+      * destructive-button: the control ("button": a.confirmation-link styled as a button) is on the page, shown, and
+        its computed colour is the probe's;
+      * destructive-dialog: a click opens a dialog whose OK button is red (its computed colour, background or ::before
+        background is the dialog's probe: core's .jenkins-button--primary[class*=color]) and whose Cancel button is
+        not; Cancel closes it and nothing changed on the server (the request still pending, the window still
+        conferring Configure)."""
+    j = Judge("destructive", ctx)
+    seen = {(r.get("where"), r.get("control")) for r in rows}
+    for where, control in DESTRUCTIVE_CONTROLS:
+        if (where, control) not in seen:
+            j.fail("destructive-measured", {"where": where, "control": control, "row": "missing"})
+    for r in rows:
+        key = {"where": r.get("where"), "control": r.get("control")}
+        probe = r.get("probe")
+        if not probe or probe == r.get("around"):
+            j.fail("destructive-measured", dict(key, probe=probe, around=r.get("around")))
+        ctl = r.get("button")
+        if not ctl or not ctl.get("visible") or r.get("http") != 200:
+            j.fail("destructive-button", dict(key, problem="no shown control", http=r.get("http"), count=r.get("count")))
+        elif ctl.get("color") != probe:
+            j.fail("destructive-button", dict(key, color=ctl.get("color"), probe=probe), {"classes": ctl.get("classes")})
+        d = r.get("dialog")
+        if not ctl:
+            continue
+        if not d:
+            j.fail("destructive-dialog", dict(key, problem="the click opened no dialog"))
+            continue
+        ok, cancel, dprobe = d.get("ok") or {}, d.get("cancel") or {}, d.get("probe")
+        problems = []
+        if not ok.get("visible") or not _painted(ok, dprobe, d.get("probe_n")):
+            problems.append("OK not in the destructive colour")
+        if not cancel.get("visible") or _painted(cancel, dprobe, d.get("probe_n")):
+            problems.append("no Cancel, or Cancel in the destructive colour")
+        if r.get("closed_on_cancel") is not True:
+            problems.append("Cancel did not close the dialog")
+        if r.get("state_before") is not True or r.get("state_after") is not True:
+            problems.append("the request is no longer pending or the window no longer confers (or never did)")
+        if problems:
+            j.fail("destructive-dialog", dict(key, problems=problems),
+                   {"ok": ok, "cancel": cancel, "probe": dprobe, "state": [r.get("state_before"), r.get("state_after")]})
+    return j
+
+
+# ------------------------------------------------------------------ r19/gate.py L (#31, r8/rebuild.py)
+REBUILD_HREF = re.compile(r"(^|/)(lastCompletedBuild|\d+)/rebuild(/|$)")
+
+
+def judge_rebuild_menu(rows, ctx=None):
+    """#31 (the retired r8/rebuild.py; e2e-07 DEF-06, e2e-08 item 3; SPEC 6 lines 114-117 and 121): the rebuild plugin's
+    "Rebuild Last" in the new job page's "More actions" menu of an approval-required job with a completed build.
+      * rebuild-menu-offered: the menu opens with its entries, Rebuild Last is one of them with the rebuild URL of a
+        build (DEF-06: a null URL left the whole menu empty), and it opens the rebuild form (200, a rebuild URL);
+      * rebuild-menu-refused: submitting that form is refused (4xx, the approval message), nothing is queued, no build
+        starts, and a TRIGGER_BLOCKED record names the user and the re-run build "#<n>" as a Rebuild (D-51).
+    The row is required: no row, or one without the menu, fails rebuild-menu-offered."""
+    j = Judge("rebuild-menu", ctx)
+    if not rows:
+        j.fail("rebuild-menu-offered", {"row": "missing"})
+    for r in rows:
+        key = {"user": r.get("user"), "job": r.get("job")}
+        menu = r.get("menu") or []
+        entry = [m for m in menu if (m.get("text") or "") == "Rebuild Last"]
+        href = (entry[0].get("href") or "") if entry else None
+        if not r.get("build") or not menu or not entry or not REBUILD_HREF.search(href or ""):
+            j.fail("rebuild-menu-offered", dict(key, build=r.get("build"), href=href, entries=[m.get("text") for m in menu][:12]),
+                   {"console": r.get("menu_console")})
+        elif r.get("entry_status") != 200 or not REBUILD_HREF.search(r.get("entry_url") or "") or not r.get("form"):
+            j.fail("rebuild-menu-offered", dict(key, entry_status=r.get("entry_status"), entry_url=r.get("entry_url"),
+                                                form=r.get("form")), {"error": r.get("entry_error")})
+        text = (r.get("submit_text") or "").lower()
+        build = f"#{r.get('build')}"
+        recorded = [x for x in r.get("records") or [] if x.get("type") == "TRIGGER_BLOCKED" and x.get("user") == r.get("user")
+                    and build in (x.get("detail") or "") and "Rebuild" in (x.get("detail") or "")]
+        problems = []
+        if not isinstance(r.get("submit_status"), int) or r["submit_status"] < 400 or not ("approv" in text or "run request" in text):
+            problems.append("the submission was not refused with the approval message")
+        if r.get("queue") or r.get("next_build") is None or r.get("next_build") != r.get("next_build_before"):
+            problems.append("something was queued or built")
+        if not recorded:
+            problems.append("no TRIGGER_BLOCKED record naming the user and the re-run build")
+        if problems:
+            j.fail("rebuild-menu-refused", dict(key, problems=problems),
+                   {k: r.get(k) for k in ("submit_status", "submit_url", "submit_error", "queue", "next_build_before",
+                                          "next_build", "records")} | {"text": text[:160]})
+    return j
+
+
+# ------------------------------------------------------------------ r14/round3.py B (#31, r9/s76.py)
+# The roles whose tab badges round3.py B measures on /batch-control/ (r9/s76.py's roles; each exists in casc/jenkins.yaml).
+BADGE_ROLES = ("admin", "requester", "approver-1", "manager", "reqonly", "approver-2", "approver-unlisted", "auditor")
+
+
+def _tip(e):
+    """The tooltip text of an element: core's l:badge writes `tooltip`; data-tooltip and title are read as well."""
+    return next((v.strip() for v in (e.get("tooltip"), e.get("data_tooltip"), e.get("title")) if v and v.strip()), "")
+
+
+def judge_badges(rows, ctx=None):
+    """#31 (the retired r9/s76.py): the Batch Control tab badges explain themselves. SPEC and TEST-MATRIX do not fix
+    the tooltip's wording, so only its presence and its number are judged (round3.py B, one row per BADGE_ROLES role):
+      * badge-tooltip: every badge below a tab is shown, its text is a number, and it carries a non-empty tooltip that
+        contains that number as a whole number ("3" does not match "13");
+      * badge-tooltip-absent: a tab that shows no badge has no tooltip-like attribute below it either (a count
+        announced without a badge);
+      * badge-tooltip-measured: each BADGE_ROLES role has a row whose overview answered 200 with its tabs measured,
+        and at least one role shows a badge (otherwise the two rules above pass on nothing)."""
+    j = Judge("badges", ctx)
+    by_user = {r.get("user"): r for r in rows}
+    shown = 0
+    for user in BADGE_ROLES:
+        r = by_user.get(user)
+        if r is None:
+            j.fail("badge-tooltip-measured", {"user": user, "row": "missing"})
+            continue
+        tabs = r.get("tabs")
+        if r.get("status") != 200 or not isinstance(tabs, list) or not tabs:
+            j.fail("badge-tooltip-measured", {"user": user, "status": r.get("status"), "tabs": None if tabs is None else len(tabs)},
+                   {"error": r.get("error")})
+            continue
+        for t in tabs:
+            key = {"user": user, "tab": t.get("tab")}
+            badges = t.get("badges") or []
+            for b in badges:
+                text, tip = (b.get("text") or "").strip(), _tip(b)
+                if not b.get("visible") or not re.fullmatch(r"\d+", text):
+                    j.fail("badge-tooltip", dict(key, problem="badge not shown with a number", text=text), b)
+                elif not tip:
+                    j.fail("badge-tooltip", dict(key, problem="no tooltip", number=text), b)
+                elif not re.search(rf"(?<!\d){text}(?!\d)", tip):
+                    j.fail("badge-tooltip", dict(key, problem="tooltip without the badge's number", number=text), {"tooltip": tip})
+                else:
+                    shown += 1
+            if not badges:
+                stray = [o for o in t.get("others") or [] if _tip(o)]
+                if stray:
+                    j.fail("badge-tooltip-absent", key, {"others": stray[:3]})
+    if rows and not shown:
+        j.fail("badge-tooltip-measured", {"badges": 0, "problem": "no role shows a badge with its tooltip"})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -906,6 +1278,12 @@ def judge(driver, rows, ctx=None):
         return judge_misc(rows, ctx)
     if driver in ("errpages", "listpager", "incident", "help", "help2", "monitor"):
         return judge_targeted(driver, rows, ctx)
+    if driver == "destructive":
+        return judge_destructive(rows, ctx)
+    if driver == "rebuild-menu":
+        return judge_rebuild_menu(rows, ctx)
+    if driver == "badges":
+        return judge_badges(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

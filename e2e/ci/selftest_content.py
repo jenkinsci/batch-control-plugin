@@ -3,7 +3,9 @@
 content_checks() (taken from crawl.py's source, its module code is not executed) in headless Chromium against two
 synthetic pages. The "defects" page plants one instance of every finding the checks must report, next to look-alikes
 that must stay silent (text in <pre>, a URL path, an optional empty column); the "clean" page renders the markup probe
-correctly and must produce no defect finding. The raw-enum INFO rows (e2e-16) are compared too (EXPECTED_ENUM). Exit 0 when both pages give exactly the expected findings.
+correctly and must produce no defect finding. The raw-enum INFO rows (e2e-16) are compared too (EXPECTED_ENUM), and the
+design-reference scan content_checks() returns (#31, EXPECTED_DESIGN). Exit 0 when both pages give exactly the expected
+findings.
 
     python e2e/ci/selftest_content.py          (BC_BROWSER_CHANNEL as for the drivers; default chromium here)
 """
@@ -54,6 +56,10 @@ DEFECTS = """<div id="main-panel"><h2>Requests</h2>
 <tbody><tr><td>#1</td><td>FAILURE</td></tr><tr><td>#2</td><td><span class="batch-control-status" data-batch-control-tone="danger">Failed</span></td></tr></tbody></table>
 <table><tbody><tr><th>Result</th><td>IN PROGRESS</td></tr></tbody></table>
 <table><thead><tr><th>Run</th><th>Cause</th></tr></thead><tbody><tr><td><a href="/jenkins/job/x/">x</a> <a href="/jenkins/job/x/3/">#3</a> <span>UNSTABLE</span></td><td>User</td></tr></tbody></table>
+<p>Pending counts are shown as tab badges (D-61).</p>
+<span title="Defined in SPEC item 8">i</span>
+<div style="display:none">Moves need Delete and Create (D-59a).</div>
+<template><p>See DECISIONS.md and the TEST-MATRIX rows.</p></template>
 </div>"""
 CLEAN = f"""<div id="main-panel"><h2>Requests</h2>
 <table><thead><tr><th>ID</th><th>Job</th><th>Comment</th></tr></thead>
@@ -67,7 +73,10 @@ CLEAN = f"""<div id="main-panel"><h2>Requests</h2>
 <table><tbody><tr><th>Result</th><td>In progress</td></tr></tbody></table>
 <table><thead><tr><th>Run</th><th>Cause</th></tr></thead><tbody>
 <tr><td><span class="batch-control-run"><svg width="16" height="16"><title>Aborted</title></svg> <a href="/jenkins/job/x/">x</a> <a href="/jenkins/job/x/4/">#4</a> <span>Aborted</span></span><div>Aborted by u1</div></td><td>User</td></tr>
-<tr><td><span>ghost</span> <span>#7</span> <span>WEIRD</span></td><td>Other</td></tr></tbody></table></div>"""
+<tr><td><span>ghost</span> <span>#7</span> <span>WEIRD</span></td><td>Other</td></tr></tbody></table>
+<code>D-61</code><pre>SPEC item 8 in a diff</pre><textarea>D-59</textarea>
+<p>Reason: e2e-17 D-75 (1): configure r17/vis-x</p>
+<p>ID-12, AD-2026x, D-1, d-61 and spec item are not design references</p></div>"""
 EXPECTED_DEFECTS = {("empty-cell", "Requests / Job"), ("empty-cell", "Requests / Requester"),
                     ("server-path", "/var/jenkins_home/batch-control/requests"), ("server-path", "StoreLocation="),
                     ("double-escaped", "&lt;"), ("markup-text", "<script"),
@@ -78,6 +87,12 @@ EXPECTED_INFO = {"Comment", "Decided by"}
 # raw-enum INFO rows (e2e-16): planted on the defects page; the clean page has look-alikes that must stay silent except
 # JOB_NAME, a real UPPER_SNAKE token in visible text (the check cannot tell a parameter name from an enum: INFO only).
 EXPECTED_ENUM = {"defects": {"ITEM:", "GRANT_REVOKE", "PENDING", "FOLDER_ONLY"}, "clean": {"JOB_NAME"}}
+
+
+# #31 (r6/s6.py): the design references content_checks() returns (the "design" scan judged by ci/h1_rules.py): planted in
+# shown text, a title attribute, hidden text and a <template> on the defects page; the clean page holds look-alikes
+# (pre/code/textarea, a driver-typed reason, words that only resemble one) and one skipped driver-typed text.
+EXPECTED_DESIGN = {"defects": ({"D-61", "SPEC item", "D-59a", "DECISIONS.md"}, 0), "clean": (set(), 1)}
 
 
 # result-cell INFO rows (#18.2): every result cell read, by its text
@@ -96,15 +111,21 @@ def check_page(page, name):
     page.set_content(html)
     # the probe's <img src=x onerror> fires once the image load fails; wait for that, not for a fixed time
     page.wait_for_function("() => [...document.images].every(i => i.complete)", timeout=5000)
-    ns["content_checks"](type("S", (), {"page": page})(), "/batch-control/requests/", "/batch-control/requests/")
+    design = ns["content_checks"](type("S", (), {"page": page})(), "/batch-control/requests/", "/batch-control/requests/")
     got = {(r["check"], r["key"]) for r in rows if r["result"] == "DEFECT"}
     info = {r["key"] for r in rows if r["check"] == "empty-optional"}
     enums = {r["key"] for r in rows if r["check"] == "raw-enum"}
     errors = [r for r in rows if r["result"] == "ERROR"]
     results = {r["key"] for r in rows if r["check"] == "result-cell"}
-    good = got == want and info == want_info and enums == EXPECTED_ENUM[name] and not errors and results == EXPECTED_RESULT_CELLS[name]
+    refs = {x["match"] for x in (design or {}).get("refs") or []}
+    want_refs, want_skipped = EXPECTED_DESIGN[name]
+    design_ok = bool(design) and design.get("texts", 0) > 0 and refs == want_refs and design.get("skipped") == want_skipped
+    good = (got == want and info == want_info and enums == EXPECTED_ENUM[name] and not errors
+            and results == EXPECTED_RESULT_CELLS[name] and design_ok)
     lines = [f"{'PASS' if good else 'FAIL'} selftest {name}: {len(got)} defect finding(s), empty-optional {sorted(info)}, "
-             f"raw-enum {sorted(enums)}, result cells {sorted(results)}"]
+             f"raw-enum {sorted(enums)}, result cells {sorted(results)}, design refs {sorted(refs)} "
+             f"(skipped {(design or {}).get('skipped')}, texts {(design or {}).get('texts')})"]
+    lines += [f"   design-ref mismatch: {x}" for x in sorted(want_refs ^ refs)]
     lines += [f"   result-cell mismatch: {x}" for x in sorted(EXPECTED_RESULT_CELLS[name] ^ results)]
     lines += [f"   raw-enum mismatch: {x}" for x in sorted(EXPECTED_ENUM[name] ^ enums)]
     lines += [f"   missed:     {x}" for x in sorted(want - got)]

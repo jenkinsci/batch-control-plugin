@@ -89,9 +89,12 @@ A step fails when its driver exits non-zero or prints one of the drivers' own fa
 `FAIL ` (`round3.py`, `def07.py`, the crawl's content checks) or `"EXCEPTION":` (`misc.py` logs a section's exception
 that way). `r15/check.py` writes `"ok": false` as a hint for the reviewer (e2e-15 judged each row by hand); the runner
 judges its rows from `r15/out/check.jsonl` and leaves out exactly the known or provoked items of e2e-13/14/15
-(`r15_problems` in `ci/shard.py`: core's GET 405/404 links, the build history widget's repeated status labels, the
-400 of the deliberately empty submit, core's D-70 MIME line and core's breadcrumb `reading 'replace'` page error,
-U-1); anything else fails. The crawl, `actions.py`, `jobui.py`, `misc.py`, the targeted scripts (`errpages.py`,
+(`r15_problems` in `ci/shard.py`: core's GET 405/404 links, the 400 of the deliberately empty submit, core's D-70 MIME line and core's breadcrumb `reading 'replace'` page error,
+U-1); anything else fails. Repeated entries inside core's side-panel widgets (build history, Build Queue, Build
+Executor Status) are not duplicates: `r15/check.py` records each element's enclosing widget and counts only the
+others (`r15_duplicates` in `ci/h1_rules.py`); core's stop buttons in those widgets (a.stop-button-link on the pane's
+own cancelItem / stopBuild / `<build>/stop` URL) answering 405 to the GET, or 404 for a one-off executor whose build
+ended, are core's known GET 405/404 (`r15_core_stop`). The crawl, `actions.py`, `jobui.py`, `misc.py`, the targeted scripts (`errpages.py`,
 `s_listpager.py`, `s_incident.py`, `helpcheck.py`, `helpcheck2.py`, `s_monitor.py`), `r14/role/*` and r15's
 `side_dialog.py`, `folder_compare.py` and `menu.py` used to be observational; since H1 (2026-10-24) each judges its own
 rows at its end with `ci/h1_rules.py` and prints `FAIL <driver> <check> <json>` for a finding no rule explains: a page
@@ -102,7 +105,14 @@ regex, exact status or whole normalised message, a page error's leading stack fr
 class and source). Warnings are never judged. An allowlist entry that applied and matched nothing prints
 `STALE allow <id>`, a warning that `summary.md` lists. `python3 e2e/ci/selftest_h1.py` replays recorded rows and
 synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
-counts the notable rows of crawl, actions and jobui.
+counts the notable rows of crawl, actions and jobui. Issue #31 moved checks that only the retired `r6`..`r11` drivers
+made into these rules, each with a required measurement (a run that does not measure fails): the crawl's design
+references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`destructive`), `r19/gate.py` L
+(`rebuild-menu`) and `r14/round3.py` B (`badges`: on `/batch-control/` as admin, requester, approver-1, manager,
+reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carries a non-empty tooltip, core's
+`l:badge` `tooltip` attribute, that contains its number, and a tab without a badge carries none; the wording is not
+judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), next to #129's `helpcheck.py` layout and
+`s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -277,6 +287,15 @@ filesystem path in the visible text (`/var/`, `/tmp/`, `/home/`, `jenkins_home`,
 `FOLDER_ONLY:`). Text in `pre`, `code` and `textarea` is not checked. Empty cells in optional columns (Decided,
 Aborted by, Comment, Parameters, ...) are logged once per pattern as `empty-optional` rows without a verdict.
 
+Design references (#31, the check of the retired `r6/s6.py`): the same `CONTENT_JS` scans the whole body of each page
+(shown or hidden text, `<template>` contents and the `title`, `tooltip`, `aria-label` and `placeholder` attributes; never
+`pre`, `code` or `textarea`) for an internal design reference: `SPEC item`, `SPEC section`, `D-<nn>`, `DECISIONS.md`,
+`TEST-MATRIX`. The page row (and the row of an Advanced expansion) carries the scan as `design` (`texts`, `skipped`,
+`refs`), and `ci/h1_rules.py` judges it: each reference is a `FAIL crawl design-ref`, and a page below 400 without the
+scan or with no text scanned a `FAIL crawl design-ref-measured` (the measurement is required). Text an e2e driver typed
+(it contains `e2e-<digit>`, as the reason `e2e-17 D-75 (1): ...` of `r17/s39.py`) is user data: counted as `skipped`,
+not judged.
+
 Raw enum values (e2e-16): an UPPER_SNAKE_CASE constant (`GRANT_REVOKE`, `APPROVED_REQUEST`, ...), the scope prefix
 `ITEM:` and the state and action words of the plugin's vocabulary (`PENDING`, `APPROVED`, ..., `CONFIGURE`, `CREATE`,
 `DELETE`) shown as text are logged once per URL pattern and value as `raw-enum` rows with result INFO, without a
@@ -289,8 +308,11 @@ look-alikes that must stay silent (a path in `<pre>`, a URL path, empty optional
 probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings and raw-enum
 rows (2026-10-06: 9 defect findings and the raw-enum values `FOLDER_ONLY`, `GRANT_REVOKE`, `ITEM:`, `PENDING` on the
 first page; no defect and only `JOB_NAME` on the second, where `GRANT_REVOKE` and `ITEM:` inside `<code>` and title-case
-words must stay silent; the same on 2026-10-06 for e2e-17). Run it after editing the checks; `.github/workflows/e2e.yml`
-runs it in the `coverage` job (22ed006).
+words must stay silent; the same on 2026-10-06 for e2e-17). Since #31 it also compares the design-reference scan that
+`content_checks()` returns: `D-61`, `SPEC item` (a `title`), `D-59a` (hidden text) and `DECISIONS.md` (a `<template>`)
+on the first page; none on the second, where `D-61` in `<code>`, `SPEC item` in `<pre>`, `D-59` in a `<textarea>`,
+`ID-12`, `D-1`, lower case and a driver-typed reason (`e2e-17 D-75 ...`, one skipped text) must stay silent. Run it after
+editing the checks; `.github/workflows/e2e.yml` runs it in the `coverage` job (22ed006).
 
 ### Fixture preconditions
 
@@ -348,7 +370,10 @@ itself did not succeed. Its log gives the reason in one line.
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN. The unit
   `r26-store-force` (#34) also builds `r26/strace.Dockerfile` (`alpine:3.24` plus `strace` from the Alpine package
   mirror) and runs it as a sidecar in the Jenkins container's PID namespace with `--cap-add SYS_PTRACE` (the runner's
-  Docker allows it; the Jenkins container gets no extra capability).
+  Docker allows it; the Jenkins container gets no extra capability). The unit `h3-upgrade` (gap H3) starts a second
+  controller from the same image on `localhost:$((BC_PORT + 100))` (18180) with its own compose project and volume, and
+  downloads the released `batch-control.hpi` from updates.jenkins.io (redirected to a get.jenkins.io mirror) unless
+  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`).
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
   the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
@@ -377,8 +402,7 @@ itself did not succeed. Its log gives the reason in one line.
   role profile).
 - Base URL, passwords and ports were already configurable (`BC_BASE`, `e2e/.env`, `BC_PORT`). The `mails()` helpers
   of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers (now in
-  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set (`legacy/browser/explore.mjs` writes
-  to a fixed local scratch path; it is an ad-hoc orientation script, not evidence).
+  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set.
 
 ## How it is configured
 
@@ -448,6 +472,14 @@ Screenshots are kept on the machine that ran the pass and are **never committed*
 (`docs/reports/e2e-*.md`), `CHECKLIST.md` and `reaudit/results.jsonl` still name each capture
 (for example `run-3-verify/B5-01-refusal-page.png`) so that it can be looked up on that machine.
 The e2e-01/02 images that were committed earlier are no longer tracked.
+
+## Removed drivers
+
+Stage one of #31 removed 69 files that CI supersedes or that never gave a verdict: copies or older versions of CI
+drivers (`r11`..`r15`, all of `r13/`), the REST scripts `scripts/rest-run-request.sh`, `rest-blocked-build.sh` and
+`rest-csv-export.sh`, the scripts `approvers-clear.sh`, `approvers-restore.sh` and `executors.sh`, and ad-hoc
+probes and screenshot helpers (some of them in `legacy/`). The reports in `docs/reports/` still name them. To read
+one, find the removing commit with `git log --diff-filter=D --oneline -- e2e/<path>` and restore it with `git show <commit>^:e2e/<path>`.
 
 ## Legacy Node.js drivers (`legacy/`)
 
@@ -525,14 +557,14 @@ Round E2E-6 (hosting review round 3, 2026-10-04). `r11/lib.py` is `r10/lib.py` w
 `screenshots/run-11/` and logs in `r11/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
 `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py` and `r11/arrange.py` (users `classic`, the requester's
 permissions with the new job page turned off, and `fonly`, Read+Move+RequestGrant; `ops/a`, `ops/sub/b`, the
-multibranch `ops/mb`, the non-approval job `fast`). `seed_fast.py` queues 60 admin builds of `fast` for the
+multibranch `ops/mb`, the non-approval job `fast`). `r14/seed_fast.py` queues 60 admin builds of `fast` for the
 dashboard bound. Scenarios: `s_dialogs.py [ADGH]` (grant and Request Run dialogs on the new UI, D-60, unknown ids),
 `s_rundlg_err.py`, `s_approve.py <run id> <grant id>`, `s_classic.py` (classic sidebar dialogs, folder-page dialog
 filing a window on the folder), `approve_api.py` / `grant_api.py` (arrangement over HTTP), `move.py` (copy of `r10/move.py`), `s_revoke.py` / `s_revoke_holder.py`, `s_activation.py`,
 `s_pages.py`, `s_width.py`, `s_tabs.py` (turns `new-build-page.flag` on for admin and back), `s_modellink.py`,
 `s_lacks_build.py`, `s_newmenu.py`, `s_d38b.py`, `r_role.py` and `d59b.py` (both replace the matrix profile; re-run
 the arrange scripts afterwards), `s_dark_monitor.py`, and `j25.py` for the Java 25 smoke under `compose.jdk25.yml`.
-Diagnostics kept as evidence: `console_check.py`, `recon_overflow.py`, `probe_tick2.py`.
+Diagnostic kept as evidence: `probe_tick2.py`.
 
 ## e2e-10 driver (`r10/`)
 
@@ -566,10 +598,6 @@ create state and are not idempotent: run them once on a fresh JENKINS_HOME, in t
 from e2e-01/e2e-02; `lib.sh` knows every account above. `scripts/cli.sh <user>
 <command>` runs jenkins-cli inside the container (it needs Java 21).
 
-`legacy/browser/audit-shots.mjs` lists screenshots that break the rule (no red box or a
-full-viewport capture); `legacy/browser/fix-shots.mjs` re-crops such a capture to its
-content and boxes it.
-
 ## Re-audit driver (`legacy/browser/audit/`)
 
 The five-criterion re-audit of run 3 (checklist 0a) lives in `legacy/browser/audit/`:
@@ -578,8 +606,7 @@ one script per section (`e1.mjs`, `e10.mjs`, `sa-read.mjs`, `a02.mjs` ... `b15.m
 `out/audit.jsonl` (copied to `reaudit/results.jsonl` at each commit; the last line
 per id wins) and `amend.mjs <id> '<json>'` re-appends a row with corrected cells.
 Run with `BC_SHOTS=run-3-audit` so `shot()` writes to `screenshots/run-3-audit/`
-(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`). `audit/audit-shots.mjs` and
-`audit/fix-shots.mjs` are the screenshot checks for that directory.
+(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`).
 
 `init.groovy.d/20-sample-jobs.groovy` runs on the first boot only and leaves
 existing items alone, so a fix to a seed job does not reach a kept `JENKINS_HOME`:
@@ -613,12 +640,67 @@ added matrix entries).
 
 Round E2E-7 (every button, link and dialog, 2026-10-04). `r12/lib.py` loads `r6/lib.py` with screenshots in
 `screenshots/run-12/` and logs in `r12/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
-`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then `seed_fast.py`, `seed.py` (requests,
-activations, windows, changes and incidents through the plugin's own endpoints; ids to `out/ids.json`) and
-`seed_paging.py`. `run_crawl.sh` (`crawl.py <role> <new|classic>` for six roles, `set_flag.py` switches the new job
-page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State-changing controls: `actions.py`;
-entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
-`helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
+`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then the seed scripts. Of the round's
+scripts only `lib.py`, `arrange.py` and `s_monitor.py` stay here; the crawl, seed, action, job-UI and targeted
+scripts live on, extended, as their `r14/` counterparts, which CI runs (the older r12 versions were removed in stage one of
+#31, see "Removed drivers").
+
+## Gap H3 driver (`h3/`): upgrade from the released plugin
+
+CI unit `h3-upgrade` (group "job ui params and restart", not `last`; weight in `ci/shard.py`). `h3/upgrade.py` upgrades a
+real controller from batch-control `1414.vc347803c1997` to the `.hpi` of this build and asserts that the existing data
+loads and keeps working. Verdicts `PASS h3 <check> {json}` / `FAIL h3 <check> {json}`, exit 1 on any FAIL; artefacts in
+`h3/out/` (both snapshots as JSON, the controller log before and after the upgrade, `upgrade.jsonl`).
+
+- **Its own controller.** `h3/compose.yml` is a stack of its own: compose project `bc-h3-<shard>` (`BC_H3_PROJECT`),
+  container `<project>-jenkins`, JENKINS_HOME volume `<project>_h3_home`, port `BC_PORT + 100` (`BC_H3_PORT`; 18180
+  under `ci/run.sh`), root context, no mail sink, no JaCoCo agent. It uses the image of `docker-compose.yml` (the core of
+  `pom.xml`, the plugins of `plugins.txt`), so on CI it costs no image build. Nothing of the shard's Jenkins is touched,
+  which is why the unit is not `last`. The driver removes the stack and its volume at its end (`BC_KEEP=1` keeps them);
+  `ci/run.sh` removes a `bc-h3-<k>` stack left by a step killed by its timeout. Its JCasC profile `h3/casc/jenkins.yaml`
+  holds only the accounts (admin, requester, approver-1, approver-2) and the URL: JCasC re-applies at every boot, so it
+  must own nothing the upgrade has to carry over (the strategy, the Batch Control configuration, the executors).
+- **The released `.hpi`.** Pinned by sha256 `9fabaa19a12b49864ccfb162c385849cd9abfea75bbe3690ab8db3f3bc6d3706` (computed
+  from the download and equal to the `sha256` of the update center's `plugin-versions.json` entry for that version).
+  `BC_RELEASED_HPI=<path>`: used when the file exists and matches, otherwise downloaded there; default path
+  `ci/.cache/released/batch-control-1414.vc347803c1997.hpi` (git-ignored). The download follows the redirect from
+  updates.jenkins.io to a mirror and retries up to six times with backoff on 429, 5xx and connection errors (honouring
+  `Retry-After`); a file with another digest is a FAIL, never used.
+- **The swap.** Both plugins are mounted, one at a time, as `/usr/share/jenkins/ref/plugins/batch-control.jpi.override`
+  (as in `docker-compose.yml`). Phase B stops the controller cleanly (the queue is saved), then re-creates the container
+  with `BC_H3_HPI` pointing at `target/batch-control.hpi` (`BC_H3_CURRENT_HPI`) on the same volume; `jenkins.sh` copies
+  the override over `plugins/batch-control.jpi` at boot. `C-plugin-swapped` proves the swap: the active version is the
+  build's (`Plugin-Version` of its manifest), not the release.
+- **Phase A** (released plugin, fresh home): the Batch Control matrix strategy (script console), the Batch Control
+  configuration saved on its page in a browser (both switches, approvers, non-default numbers, admin self-approval off),
+  six jobs created and configured over REST plus one whose CREATE record is written with the plugin clock in last month
+  (two month buckets), `h3-cron` (every minute) activated by an approved ACTIVATE request and running on its timer,
+  `h3-held` (every minute) with only a pending ACTIVATE request, run requests EXECUTED, REJECTED, CANCELLED, PENDING and
+  APPROVED-with-its-run-in-the-queue (executors 0), an approved CONFIGURE window on `h3-target` and a pending DELETE
+  window request on `h3-other`, an incident (failing build) acknowledged. Then the snapshot: every entity loaded through
+  the plugin's store (every getter of every request, window, grant, activation request and state, incident; the values
+  files), each item page's status, the job pages' activation notices, the four History CSV exports, the configuration,
+  the strategy class and entries, the active Batch Control monitors, the store's file names, queue and builds.
+- **Phase C** checks: loading (`C-plugin-swapped`, `C-log-clean`: no XStream or class-loading error and no Batch Control
+  WARNING/SEVERE line in the new boot's log, `C-old-data-monitor`, `C-monitors`); identical state (`C-strategy`,
+  `C-config`, `C-entities-<kind>` for each entity kind with no entity missing, `C-approved-expiry-rebased`: the one value
+  a restart legitimately moves, SPEC 7, later never earlier, `C-no-reseeding`, `C-pages`, `C-activation-notices`,
+  `C-csv-<kind>`, `C-store-files`, `C-queue-restored`, `C-history-listings` with last month's record); still working
+  (`C-queued-approved-runs-once`, `C-timer-fires-after-upgrade`: a timer build of `h3-cron` whose queue item was not
+  restored from phase A, SPEC 6a, `C-held-timer-still-refused`, `C-pending-approved-runs`, `C-window-confers`: the
+  requester changes `h3-target`'s config.xml (200, the CONFIGURE record names the window) and not `h3-other`'s (403),
+  `C-pending-window-approved`, `C-pending-activation-approved`, `C-new-request`, `C-incident-resolved`,
+  `C-log-clean-at-end`). Every wait is a bounded poll.
+- **Proof hook.** `BC_H3_TAMPER='<sh>'` runs a shell snippet on the volume between the phases (throwaway container,
+  working directory JENKINS_HOME, the phase A ids as variables `PENDING`, `APPROVED`, `GRANT`, `ACT_PENDING`, ...), to
+  show that the checks go red; never set in CI. For example `rm batch-control/grants/$GRANT.xml` fails
+  `C-entities-grants`, `C-store-files` and `C-window-confers`.
+
+Alone, without a shard: `BC_RELEASED_HPI=... venv/bin/python e2e/h3/upgrade.py` (needs `e2e/.env` and
+`target/batch-control.hpi`; about 2 to 2.5 minutes locally). In a shard: `BC_UNITS=h3-upgrade PY=$PWD/venv/bin/python
+e2e/ci/run.sh 4/7`. Not covered: an upgrade between two different code bases (on 2026-10-31 the release and `main` had
+the same `src/main`, so today the unit guards the next change), Pipeline jobs, folders, file and secret parameters
+(`r19/restart.py` covers those across a restart), role-strategy, a JCasC-configured Batch Control, retention.
 
 ## e2e-21 driver (`r21/`): Reject button colour
 
@@ -631,8 +713,20 @@ page in its own context, and the browser's computed styles are compared: the Rej
 a probe inserted next to it with `style="color: var(--destructive-color)"` (the theme's red, not a hard-coded RGB). The
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
 button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
-the three requests. Light theme only. Alone:
-`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of it the shared setup).
+the three requests. Light theme only.
+
+Section `D` (#31, the check of the retired `r6/s5c.py`; the CI step runs `reject_color.py RGAD`): the requester opens
+the three pending requests and measures "Cancel Request"; admin opens the grants list and the detail page of a window
+the requester holds (CONFIGURE on `r21-reject`, approved over REST for D and revoked in the clean-up) and measures
+"Revoke". Each control (core's `l:confirmationLink`, found by its `data-url`) is compared with the same probe, then
+clicked: core's confirmation dialog must open, its OK button must be red (its computed colour, background or `::before`
+background, where core paints a button's background, equal to a probe inside the dialog, also compared after a canvas
+normalisation so `oklch(...)` and `rgb(...)` match: core's destructive dialog type) and its Cancel button not, and Cancel
+must close it and change nothing (the request still pending, the window still conferring Configure). The rows are judged by `ci/h1_rules.py`
+(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the five
+controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
+`-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
+it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 
@@ -680,12 +774,17 @@ adds the CLI (inside the Jenkins container), the mailpit sink (`BC_MAIL_PORT`), 
 starts with the D-31/D-34 lock and not activated), a username/password credential `r19-cred-id`, the lockable resource
 `r19-res`, a multi-configuration project `r19-mx` and an organization folder `r19-org`. Accounts are JCasC's.
 
-- `gate.py [BPARXM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
+- `gate.py [BCPARXLM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
   may request); REST `build`/`buildWithParameters`, the CLI `build`, the build token on core's endpoint and on
   build-token-root, a Pipeline Replay and the rebuild plugin's Rebuild are refused, nothing is queued, the refusals are
   recorded; an approved request runs exactly once with exactly its values, the build page names request, requester and
   approver, the request links the build; a consumed approval marker presented again is MARKER_REUSE_BLOCKED (Changes,
-  `changes.csv`).
+  `changes.csv`). Section L (#31, the check of the retired `r8/rebuild.py`; e2e-07 DEF-06): `nobc` (another user than
+  X's requester, so its attempt on the same build is not merged into X's record, D-51) opens the new job page's "More
+  actions" menu of `r19-gate`: it must list "Rebuild Last" with the rebuild URL of the last completed build (DEF-06: a
+  null URL left the whole menu empty), the entry must open the rebuild form, and its submission must be refused (4xx,
+  the approval message) with nothing queued and a TRIGGER_BLOCKED record naming `nobc` and the build. Judged by
+  `ci/h1_rules.py` (driver `rebuild-menu`: `rebuild-menu-offered`, `rebuild-menu-refused`; a missing row fails).
 - `plugins.py [NCLZHI]` (unit `r19-plugins`): naginator's retry of an approved run refused and recorded;
   customize-build-now keeps Request Run; lockable-resources and authorize-project ("Run as Specific User" admin; the
   project default authenticator is added and removed again) with an approved run; jobConfigHistory and the CLI
@@ -750,31 +849,24 @@ seeded before the e2e-15 seed fix) and indexes it (`main`, `feature-1`). `check.
 page on and off: every side-panel, app-bar, breadcrumb and main-panel control on the activation pages of `team-mb`, its
 two branch jobs, `batch-pipeline` and `batch-daily`; approver-1 404), `check.py submit <flag> <page> <user>`, `menu.py`
 (app-bar More actions on each job page vs its activation sub-page; disable `rebuild` first for `batch-daily`, see the
-e2e-06 note), `side_dialog.py`, `folder_compare.py`, and `probe.py` (diagnostic). Stop with
+e2e-06 note), `side_dialog.py` and `folder_compare.py`. Stop with
 `docker compose -p bc-e2e15 -f docker-compose.yml -f compose.prefix.yml down -v`.
 
 ## e2e-14 driver (`r14/`)
 
 Final check of `main` after rounds 3 and 4 (2026-10-04). `r14/lib.py` is `r12/lib.py` with screenshots in
-`screenshots/run-14/` and logs in `r14/out/`; the r12 scripts are copied unchanged apart from their docstrings.
+`screenshots/run-14/` and logs in `r14/out/`; the r12 scripts were copied here and have since been extended (H1
+judging, M4), so the r14 versions are the current ones.
 Fresh JENKINS_HOME under its own compose project:
 `docker compose -p bc-e2e14 -f docker-compose.yml -f compose.prefix.yml up -d --build`, then the r12 arrangement plus
 `arrange_fast.py` (removes the new-job lock from `fast`, which the script console creates while run control is on)
 before `seed_fast.py`. New scripts: `def07.py <new|classic> [role ...]` (e2e-12 DEF-07 recheck: filter URLs, pager and
-export links keep the filter), `round3.py [ABCDEFGHI]` (the e2e-11 round-3 checks with assertions), `probe_pageerror.py`
-(diagnostic). `role/` holds the e2e-13 role-strategy drivers with `BC_BASE` defaulting to the `/jenkins` prefix;
+export links keep the filter), `round3.py [ABCDEFGHI]` (the e2e-11 round-3 checks with assertions). `role/` holds the e2e-13 role-strategy drivers with `BC_BASE` defaulting to the `/jenkins` prefix;
 `grant_overlay.py` now opens the grants page dialog (D-66). Run `role/` last: `setup.py` replaces the matrix profile.
 Stop with `docker compose -p bc-e2e14 down -v`.
 
 ## e2e-13 driver (`r13/`)
 
-role-strategy 927 forwarding check (D-35g, 2026-10-04). `r13/lib.py` loads `r6/lib.py` with base URL
-`http://localhost:8080` (plain `docker-compose.yml`, override with `BC_BASE`), screenshots in
-`screenshots/run-13/` and logs in `r13/out/`. `PY=<venv python> r13/run_all.sh` starts a fresh
-JENKINS_HOME under the separate compose project `bc-e2e13` (the shared `batch-control-e2e` volume is
-left alone) and runs, in order: `setup.py` (applies `casc/profile-role.yaml`), `manage_roles.py`
-(Add Role dialog, pattern check), `assign_roles.py` (Add User or Group dialog, sid check, assign,
-unassign, remove), `grant_overlay.py` (CONFIGURE window on `team/app-1` over role-strategy roles,
-Manage Roles save during the window, revoke) and `endpoints.py` (forwarded bodies against
-role-strategy's own descriptor, 403/405 refusals). `reset_nobc.py` clears `nobc`'s assignments to
-re-run `assign_roles.py` alone. Stop with `docker compose -p bc-e2e13 down -v`.
+role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were removed in stage one of #31 (see
+"Removed drivers"): `r14/role/` holds their successors, run by CI under the `/jenkins` prefix (`setup.py` applies
+`casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).
