@@ -93,6 +93,7 @@ jobs:
             if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
               break
             fi
+            [ "$attempt" -lt 2 ] || break
             echo "Maven failed on artifact resolution; retrying once (see #88)"
           done
           exit "$status"
@@ -137,6 +138,7 @@ jobs:
             if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
               break
             fi
+            [ "$attempt" -lt 2 ] || break
             echo "Maven failed on artifact resolution; retrying once (see #88)"
           done
           exit "$status"
