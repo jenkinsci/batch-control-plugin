@@ -927,6 +927,10 @@ for _u in ("requester", "approver-1"):
     for _p in ("/manage/role-strategy/", "/manage/role-strategy/manage-roles"):
         RS7[f"page {_p} GET {_u}"] = 403
 RS_STRATEGY = "BatchControlRoleBasedAuthorizationStrategy"
+# #31 (r6/s2b.py, r6/s2d.py): what manage_roles.py's second part edits, checks and removes in the browser
+RS_EDIT = {"role": "e2e31-prod", "old": "prod/.*", "new": "prod(/.*)?", "perms": "[hudson.model.Item.Read]",
+           "template": "e2e31-tpl", "template perms": "[hudson.model.Item.Read, hudson.model.Item.Workspace]"}
+RS_MATCH_CAP = 15  # role-strategy 927's manage-roles bundle: getMatchingJobs?maxJobs=15
 
 
 def judge_role(name, res, ctx=None):
@@ -969,6 +973,8 @@ def judge_role(name, res, ctx=None):
                                                       "item role after reload", "add enabled with invalid pattern",
                                                       "server item role", "strategy", "bad")} | {"bad requests": bad_req()})
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
+    elif name == "manage_edit":
+        manage_edit(j, res, bad_req)
     elif name == "endpoints":
         rs6 = res.get("RS-6 admin forwarded == role-strategy") or {}
         bad6 = {k: v[:2] for k, v in rs6.items() if v[0] != 200 or v[1] is not True}
@@ -982,6 +988,74 @@ def judge_role(name, res, ctx=None):
         if res.get("strategy") != RS_STRATEGY:
             j.fail("RS-7", {"strategy": res.get("strategy")})
     return j
+
+
+def manage_edit(j, res, bad_req):
+    """#31 (the retired r6/s2b.py and r6/s2d.py; SPEC: "With the Batch Control role-strategy strategy installed, Manage
+    Roles, item and agent roles ... work"), manage_roles.py's second part in the browser as admin. The endpoints are
+    guarded on the server (T-02-88..92); these rules guard role-strategy's pages driving them under the Batch Control
+    class:
+      * role-edit: the card of the existing item role RS_EDIT["role"] (pattern RS_EDIT["old"]) opens its Edit role dialog,
+        Save is enabled for RS_EDIT["new"] (the forwarded checkPattern accepts it) and closes the dialog; after a reload
+        the card shows the new pattern and the server holds it with the permissions kept, the strategy still RS_STRATEGY;
+      * role-pattern-check: the card's pattern button opens the "Items matching" dialog, titled with the pattern the card
+        shows, which lists exactly the items whose full name that pattern matches on the server (script console,
+        independent of role-strategy; at least one; beyond RS_MATCH_CAP matches, that many of them), and closes (judged
+        on the shown pattern, so a failed edit does not fail this rule as well);
+      * role-delete: Delete role opens a confirmation naming the role; Cancel closes it and keeps the role (unchanged on
+        the server); OK closes it and removes the role (no card after a reload, none on the server), the strategy still
+        RS_STRATEGY;
+      * template-add: on Permission Templates the Add Template dialog creates RS_EDIT["template"] with
+        RS_EDIT["template perms"] (server), listed after a reload, the strategy still RS_STRATEGY;
+      * template-delete: the template card's Delete template, confirmed, removes it (not listed, none on the server),
+        the strategy still RS_STRATEGY;
+      * role-edit-measured: the arrangement (role-strategy's addRole, 200, the role on the server with the old pattern)
+        held, the card was found, and the driver raised nothing;
+      * role-edit-requests, console: no role-strategy request answered >= 400, no unexplained console error."""
+    e = RS_EDIT
+    if (res.get("arrange addRole") != 200 or res.get("server role before") != f"{e['old']} {e['perms']}"
+            or (res.get("card before") or [0])[0] != 1 or res.get("error")):
+        j.fail("role-edit-measured", {k: res.get(k) for k in ("arrange addRole", "server role before", "card before", "error")})
+    if not (res.get("edit dialog") == f"Edit role: {e['role']}" and res.get("save enabled") is True
+            and res.get("edit closed") is True and res.get("card after reload") == [1, e["new"]]
+            and res.get("server role after edit") == f"{e['new']} {e['perms']}" and res.get("strategy after edit") == RS_STRATEGY):
+        j.fail("role-edit", {k: res.get(k) for k in ("edit dialog", "save enabled", "pattern field", "edit closed", "card after reload",
+                                                     "server role after edit", "strategy after edit")})
+    pd, want = res.get("pattern dialog") or {}, res.get("server matching")
+    shown = (res.get("card after reload") or [0, None])[1]
+    listed = pd.get("items")
+    # role-strategy asks for at most RS_MATCH_CAP items (maxJobs): beyond that the dialog lists that many of the matches
+    full = (listed == want if isinstance(want, list) and len(want) <= RS_MATCH_CAP
+            else isinstance(listed, list) and len(listed) == RS_MATCH_CAP and set(listed) <= set(want or []))
+    if not (pd.get("opened") and shown and f'"{shown}"' in (pd.get("title") or "") and isinstance(want, list) and want
+            and full and pd.get("closed") is True):
+        j.fail("role-pattern-check", {"shown": shown, "dialog": {k: pd.get(k) for k in ("opened", "title", "closed")},
+                                      "listed": pd.get("items"), "server": want})
+    dd = res.get("delete dialog") or {}
+    if not (dd.get("opened") and e["role"] in (dd.get("title") or "") and dd.get("closed on cancel") is True
+            and dd.get("listed after cancel") == 1 and dd.get("server after cancel") not in (None, "none")
+            and dd.get("server after cancel") == res.get("server role after edit")
+            and dd.get("closed on ok") is True and res.get("listed after delete") == 0
+            and res.get("server role after delete") == "none" and res.get("strategy after delete") == RS_STRATEGY):
+        j.fail("role-delete", dict(dd, **{k: res.get(k) for k in ("listed after delete", "server role after delete",
+                                                                 "strategy after delete")}))
+    ta = res.get("template add dialog") or {}
+    if not (ta.get("opened") and ta.get("closed") is True and res.get("template listed after reload") == 1
+            and res.get("server template after add") == e["template perms"]
+            and res.get("strategy after template add") == RS_STRATEGY):
+        j.fail("template-add", dict(ta, **{k: res.get(k) for k in ("template listed after reload", "server template after add",
+                                                                  "strategy after template add")}))
+    td = res.get("template delete dialog") or {}
+    if not (td.get("opened") and e["template"] in (td.get("title") or "") and td.get("closed") is True
+            and res.get("template listed after delete") == 0 and res.get("server template after delete") == "none"
+            and res.get("strategy after template delete") == RS_STRATEGY):
+        j.fail("template-delete", dict(td, **{k: res.get(k) for k in ("template listed after delete",
+                                                                     "server template after delete",
+                                                                     "strategy after template delete")}))
+    if bad_req() or res.get("bad") or res.get("template bad"):
+        j.fail("role-edit-requests", {"bad requests": bad_req(), "bad": res.get("bad"), "template bad": res.get("template bad")})
+    j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
+    j.console("console", res.get("template console"), {"role": "admin", "page": "/manage/role-strategy/permission-templates"})
 
 
 # ------------------------------------------------------------------ r15

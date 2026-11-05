@@ -366,8 +366,9 @@ UNITS = [
         ("role-naming", py("r19/naming.py")),  # e2e-19 G-27; re-applies profile-role.yaml at its end
         ("flag-role-crawl", flag("true", *ROLE_CRAWL)),
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
-        last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
-            "window), then a crawl under it (replaces the strategy: last)"),
+        last=True, doc="e2e-13/14 RS: role-strategy 927 profile (#31: Manage Roles edit, pattern check and delete, Permission "
+            "Templates add and delete), e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE window), then a crawl "
+            "under it (replaces the strategy: last)"),
     # e2e-22 R2-04 (bug-hunt batch B). r22/rename_queue.py saves the authorization strategy, applies a Batch Control
     # role-based profile through JCasC for its own items (r22-team-a-*), and restores the strategy, the change-control
     # switch and the built-in node's labels exactly at its end (so it needs no `last`).

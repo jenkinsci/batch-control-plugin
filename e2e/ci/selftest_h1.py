@@ -85,7 +85,7 @@ def read_artefacts(base):
             rows = [{"page": m[0], "help": m[1], "before": int(m[2]), "after": int(m[3])}
                     for m in re.findall(r"^(\S+) (\S+) (\d+) -> (\d+)$", Path(logs[0]).read_text(), re.M)]
             units.append({"driver": "help2", "shard": shard, "rows": rows, "ctx": {}})
-        for name in ("grant_overlay", "assign_roles", "manage_roles", "endpoints"):
+        for name in ("grant_overlay", "assign_roles", "manage_roles", "manage_edit", "endpoints"):
             f = Path(out, "role", name + ".jsonl")
             if f.exists():
                 units.append({"driver": "role/" + name, "shard": shard, "rows": _jsonl(f)[-1:], "ctx": {}})
@@ -291,6 +291,31 @@ TOGGLE = "/job/ops/job/mb/batch-control-activation/"
 WS_PAGE = "/job/ops/job/job-a/batch-control/"
 D70_LINE = ("error: Refused to execute script from 'http://localhost:18080/jenkins/static/b1c10f94/' because its MIME type "
             "('text/html') is not executable, and strict MIME type checking is enabled.")
+
+
+def _manage_edit(change=None, **parts):
+    """manage_roles.py's #31 res (judge_role "manage_edit") as a green run logs it; `change` replaces top-level keys,
+    `parts` updates the nested dialog dicts (pattern_dialog, delete_dialog, template_add_dialog, template_delete_dialog)."""
+    new, old, perms, tperms = "prod(/.*)?", "prod/.*", "[hudson.model.Item.Read]", "[hudson.model.Item.Read, hudson.model.Item.Workspace]"
+    items = ["prod", "prod » adm-job", "prod » x"]
+    res = {"arrange addRole": 200, "server role before": f"{old} {perms}", "card before": [1, old],
+           "edit dialog": "Edit role: e2e31-prod", "save enabled": True, "edit closed": True, "card after reload": [1, new],
+           "server role after edit": f"{new} {perms}", "strategy after edit": h1.RS_STRATEGY, "server matching": items,
+           "pattern dialog": {"opened": True, "title": f'Items matching "{new}"', "items": items, "closed": True},
+           "delete dialog": {"opened": True, "title": 'Delete role "e2e31-prod"?', "closed on cancel": True,
+                             "listed after cancel": 1, "server after cancel": f"{new} {perms}", "closed on ok": True},
+           "listed after delete": 0, "server role after delete": "none", "strategy after delete": h1.RS_STRATEGY,
+           "console": [], "bad": [],
+           "template add dialog": {"opened": True, "title": "Add permission template", "closed": True},
+           "template listed after reload": 1, "server template after add": tperms, "strategy after template add": h1.RS_STRATEGY,
+           "template delete dialog": {"opened": True, "title": 'Delete template "e2e31-tpl"?', "closed": True},
+           "template listed after delete": 0, "server template after delete": "none",
+           "strategy after template delete": h1.RS_STRATEGY, "template console": [], "template bad": [],
+           "requests": ["200 POST /role-strategy/strategy/addRole", "200 GET /role-strategy/strategy/getMatchingJobs?pattern=x"]}
+    for k, v in parts.items():
+        res[k.replace("_", " ")] = dict(res[k.replace("_", " ")], **v)
+    res.update(change or {})
+    return res
 
 
 def _endpoints(change=None):
@@ -843,6 +868,54 @@ def synthetic():
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
            "2 approved (window open): requester configure": 200, "3 after a Manage Roles save during the window: requester configure": 403,
            "4 revoked: requester configure": 403, "browser configure after revoke": 403}], {}, "fail", "overlay"),
+        ("role: #31 edit, pattern check, delete and templates as a green run logs them", "role/manage_edit", [_manage_edit()],
+         {}, "pass", None),
+        ("role: #31 Save stays disabled for a valid pattern (the forwarded checkPattern refuses it)", "role/manage_edit",
+         [_manage_edit({"save enabled": False, "edit closed": None, "card after reload": [1, "prod/.*"],
+                        "server role after edit": "prod/.* [hudson.model.Item.Read]"})], {}, "fail", "role-edit"),
+        ("role: #31 the edit saved the pattern but dropped the permissions", "role/manage_edit",
+         [_manage_edit({"server role after edit": "prod(/.*)? []"})], {}, "fail", "role-edit"),
+        ("role: #31 the edit installed the plain role-strategy class", "role/manage_edit",
+         [_manage_edit({"strategy after edit": "RoleBasedAuthorizationStrategy"})], {}, "fail", "role-edit"),
+        ("role: #31 the pattern check lists fewer items than the server matches", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"items": ["prod", "prod » adm-job"]})], {}, "fail", "role-pattern-check"),
+        ("role: #31 more matches than role-strategy asks for: the dialog lists 15 of them", "role/manage_edit",
+         [_manage_edit({"server matching": [f"prod » j{i:02}" for i in range(20)]},
+                       pattern_dialog={"items": [f"prod » j{i:02}" for i in range(15)]})], {}, "pass", None),
+        ("role: #31 more matches than role-strategy asks for, but the dialog lists 3", "role/manage_edit",
+         [_manage_edit({"server matching": [f"prod » j{i:02}" for i in range(20)]},
+                       pattern_dialog={"items": [f"prod » j{i:02}" for i in range(3)]})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the pattern check never opens", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"opened": False, "items": None, "title": None})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the pattern check titled with another pattern", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"title": 'Items matching "prod/.*"'})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the server matches nothing (an empty list proves nothing)", "role/manage_edit",
+         [_manage_edit({"server matching": []}, pattern_dialog={"items": []})], {}, "fail", "role-pattern-check"),
+        ("role: #31 Delete role removes without asking", "role/manage_edit",
+         [_manage_edit(delete_dialog={"opened": False, "title": None, "closed on cancel": None, "listed after cancel": 0,
+                                      "server after cancel": "none"})], {}, "fail", "role-delete"),
+        ("role: #31 Cancel on Delete role removes the role", "role/manage_edit",
+         [_manage_edit(delete_dialog={"listed after cancel": 0, "server after cancel": "none"})], {}, "fail", "role-delete"),
+        ("role: #31 OK on Delete role keeps the role", "role/manage_edit",
+         [_manage_edit({"listed after delete": 1, "server role after delete": "prod(/.*)? [hudson.model.Item.Read]"})], {},
+         "fail", "role-delete"),
+        ("role: #31 Add Template stores other permissions", "role/manage_edit",
+         [_manage_edit({"server template after add": "[hudson.model.Item.Read]"})], {}, "fail", "template-add"),
+        ("role: #31 Add Template's dialog never opens", "role/manage_edit",
+         [_manage_edit({"template listed after reload": 0, "server template after add": "none"},
+                       template_add_dialog={"opened": False, "closed": None})], {}, "fail", "template-add"),
+        ("role: #31 the template delete keeps the template", "role/manage_edit",
+         [_manage_edit({"template listed after delete": 1, "server template after delete": "[hudson.model.Item.Read]"})], {},
+         "fail", "template-delete"),
+        ("role: #31 the template delete swapped the strategy class", "role/manage_edit",
+         [_manage_edit({"strategy after template delete": "RoleBasedAuthorizationStrategy"})], {}, "fail", "template-delete"),
+        ("role: #31 the arrangement failed (addRole 403)", "role/manage_edit",
+         [_manage_edit({"arrange addRole": 403})], {}, "fail", "role-edit-measured"),
+        ("role: #31 the driver raised after the edit", "role/manage_edit",
+         [_manage_edit({"error": "TimeoutError('Locator.click')"})], {}, "fail", "role-edit-measured"),
+        ("role: #31 no manage_edit row at all", "role/manage_edit", [], {}, "fail", "role-edit-measured"),
+        ("role: #31 removeTemplates answered 500", "role/manage_edit",
+         [_manage_edit({"requests": ["500 POST /role-strategy/strategy/removeTemplates"]})], {}, "fail", "role-edit-requests"),
         ("role: RS-7 as the script builds it (tuples) equals the table", "role/endpoints", [_endpoints()], {}, "pass", None),
         ("role: RS-7 with one refusal turned into 200", "role/endpoints", [_endpoints({"checkSidName POST nobc": (200, "")})],
          {}, "fail", "RS-7"),

@@ -123,7 +123,13 @@ table, every alert and the current tab paint the theme's own variables, read on 
 `var(--x)`: `--table-background`, `--table-body-background`, `--text-color`, `--table-header-foreground`,
 `--alert-<variant>-bg-color`/`-text-color`, `--button-background` on the tab's `::before`; the light variables are read
 before the switch so the comparison is never light against light: `dark-table`, `dark-alert`, `dark-tab`,
-`dark-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+`dark-measured`), `r14/role/manage_roles.py`'s second part (`role/manage_edit`, under the Batch Control role strategy
+as admin: the Edit role dialog of an existing item role saves a new pattern, kept after a reload and on the server with
+its permissions; the card's pattern button lists exactly the items the server matches for the shown pattern; Delete
+role asks first, Cancel keeps and OK removes the role; the Permission Templates Add Template dialog creates a template
+with the chosen permissions and its card's Delete template, confirmed, removes it; the strategy class is read after
+every step: `role-edit`, `role-pattern-check`, `role-delete`, `template-add`, `template-delete`, `role-edit-measured`,
+`role-edit-requests`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -949,3 +955,6 @@ Stop with `docker compose -p bc-e2e14 down -v`.
 role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were removed in stage one of #31 (see
 "Removed drivers"): `r14/role/` holds their successors, run by CI under the `/jenkins` prefix (`setup.py` applies
 `casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).
+`manage_roles.py` adds e2e13-global and e2e13-team in the browser (kept for the later scripts), then (#31, the checks
+of the retired `r6/s2b.py` and `r6/s2d.py`) edits, pattern-checks and deletes its own item role e2e31-prod and adds and
+deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`).
