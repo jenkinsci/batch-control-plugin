@@ -467,6 +467,28 @@ def _badge_rows(**change):
     return [r for r in rows.values() if r is not None]
 
 
+# #31 (r11/s_tabs.py #2): round3.py C rows of the tab bar at 1024 and 800 px as main renders them (2026-11-06: admin's
+# eight tabs on one row at 1024 and two rows at 800, the page as wide as the viewport).
+NARROW_TABS = ("overview", "requests", "activations", "grants", "changes", "dashboard", "incidents", "history")
+
+
+def _narrow(user, width, **change):
+    rights = [135, 301, 426, 521, 631, 754, 866, 966] if width == 1024 else [129, 295, 420, 515, 625, 748, 128, 228]
+    tabs = [{"tab": t, "left": r - 100, "right": r, "top": 126 if width == 1024 or i < 6 else 168, "visible": True}
+            for i, (t, r) in enumerate(zip(NARROW_TABS, rights))]
+    r = {"user": user, "width": width, "status": 200, "nav": True, "scrollW": width, "clientW": width, "navLeft": 20,
+         "navRight": width - 20, "navH": 38 if width == 1024 else 80, "navScrollW": width - 40, "navClientW": width - 40,
+         "overflowX": "visible", "rows": 1 if width == 1024 else 2, "tabs": tabs}
+    r.update(change)
+    return r
+
+
+def _narrow_rows(drop=None, **changes):
+    """One row per user and width; `changes` maps "<user>_<width>" (dashes as _) to its changes."""
+    return [_narrow(u, w, **changes.get(f"{u}_{w}".replace("-", "_"), {})) for u in h1.TAB_BAR_NARROW_USERS
+            for w in h1.TAB_BAR_NARROW_WIDTHS if (u, w) != drop]
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -822,6 +844,29 @@ def synthetic():
         ("badges: #31 no role shows a badge (the check would pass on nothing)", "badges",
          [_badge_row(u) for u in h1.BADGE_ROLES], {}, "fail", "badge-tooltip-measured"),
         ("badges: #31 no row at all", "badges", [], {}, "fail", "badge-tooltip-measured"),
+        # #31 (r11/s_tabs.py #2): the tab bar at 1024 and 800 px (round3.py C)
+        ("tab-bar-narrow: #31 the bar wraps at 800 px, the page is as wide as the viewport", "tab-bar-narrow", _narrow_rows(),
+         {}, "pass", None),
+        ("tab-bar-narrow: #31 one pixel of sub-pixel rounding is no scroll", "tab-bar-narrow",
+         _narrow_rows(admin_800={"scrollW": 801}), {}, "pass", None),
+        ("tab-bar-narrow: #31 the bar does not wrap and scrolls the page sideways at 800 px", "tab-bar-narrow",
+         _narrow_rows(admin_800={"scrollW": 1066, "navRight": 1046, "rows": 1,
+                                 "tabs": [dict(t, right=t["right"] + 300 * (i // 6)) for i, t in enumerate(_narrow("admin", 800)["tabs"])]}),
+         {}, "fail", "tab-bar-narrow-scroll"),
+        ("tab-bar-narrow: #31 the bar scrolls inside itself (overflow-x auto): tabs out of reach, no page scroll",
+         "tab-bar-narrow", _narrow_rows(approver_1_800={"navScrollW": 1006, "overflowX": "auto"}), {}, "fail",
+         "tab-bar-narrow-reach"),
+        ("tab-bar-narrow: #31 a tab hidden at 1024 px", "tab-bar-narrow",
+         _narrow_rows(admin_1024={"tabs": [dict(t, visible=t["tab"] != "history") for t in _narrow("admin", 1024)["tabs"]]}),
+         {}, "fail", "tab-bar-narrow-reach"),
+        ("tab-bar-narrow: #31 the 1024 px row of approver-1 missing", "tab-bar-narrow", _narrow_rows(drop=("approver-1", 1024)),
+         {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 no tab bar on the overview", "tab-bar-narrow", _narrow_rows(admin_800={"nav": False, "tabs": []}),
+         {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 fewer tabs at 800 px than at 1024 px", "tab-bar-narrow",
+         _narrow_rows(admin_800={"tabs": _narrow("admin", 800)["tabs"][:6]}), {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 no row at all (section C did not reach the check)", "tab-bar-narrow", [], {}, "fail",
+         "tab-bar-narrow-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],

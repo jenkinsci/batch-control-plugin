@@ -1269,6 +1269,59 @@ def judge_badges(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py C (#31, r11/s_tabs.py #2)
+# The bars round3.py C measures on /batch-control/ at narrow widths: admin has every tab, approver-1 every tab of its
+# sections with badges (its bar already takes two rows at 1024 px).
+TAB_BAR_NARROW_USERS = ("admin", "approver-1")
+TAB_BAR_NARROW_WIDTHS = (1024, 800)
+NARROW_TOLERANCE_PX = 2  # sub-pixel rounding of text widths, as round3.py's SCROLL_TOLERANCE_PX
+
+
+def judge_tab_bar_narrow(rows, ctx=None):
+    """#31 (the retired r11/s_tabs.py #2; e2e-11 R4-7: the bar "wraps to 2 rows at 1024 and 800, with no horizontal
+    scroll"): the Batch Control tab bar may wrap at a narrow width, but it neither makes the page scroll sideways nor puts
+    a tab out of reach. round3.py C opens /batch-control/ (the overview: the bar and badges, nothing else that is wide,
+    so a sideways scroll there comes from the bar) as each TAB_BAR_NARROW_USERS user at each TAB_BAR_NARROW_WIDTHS width:
+      * tab-bar-narrow-scroll: the document's scroll width is at most its client width (+ NARROW_TOLERANCE_PX);
+      * tab-bar-narrow-reach: every tab is shown and lies inside the viewport (left >= 0, right <= client width + the
+        tolerance), and the bar has no hidden overflow of its own (its scroll width at most its client width + the
+        tolerance: tabs clipped or scrolled inside the bar are out of reach too);
+      * tab-bar-narrow-measured: a row for each user and width whose page answered 200 with the bar and its tabs measured,
+        the same number of tabs at every width of a user. How many rows the bar takes is recorded, not judged."""
+    j = Judge("tab-bar-narrow", ctx)
+    tol = NARROW_TOLERANCE_PX
+    seen = {(r.get("user"), r.get("width")): r for r in rows}
+    counts = {}
+    for user in TAB_BAR_NARROW_USERS:
+        for width in TAB_BAR_NARROW_WIDTHS:
+            r = seen.get((user, width))
+            key = {"user": user, "width": width}
+            if r is None:
+                j.fail("tab-bar-narrow-measured", dict(key, row="missing"))
+                continue
+            tabs = r.get("tabs")
+            if r.get("status") != 200 or not r.get("nav") or not isinstance(tabs, list) or not tabs:
+                j.fail("tab-bar-narrow-measured", dict(key, status=r.get("status"), nav=r.get("nav"),
+                                                       tabs=None if tabs is None else len(tabs)), {"error": r.get("error")})
+                continue
+            counts.setdefault(user, set()).add(len(tabs))
+            if (r.get("scrollW") or 0) > (r.get("clientW") or 0) + tol:
+                j.fail("tab-bar-narrow-scroll", dict(key, scrollW=r.get("scrollW"), clientW=r.get("clientW")),
+                       {"navRight": r.get("navRight"), "rows": r.get("rows"), "overflowX": r.get("overflowX")})
+            out = [t.get("tab") for t in tabs if not t.get("visible") or (t.get("left") or 0) < 0
+                   or (t.get("right") or 0) > (r.get("clientW") or 0) + tol]
+            hidden = (r.get("navScrollW") or 0) > (r.get("navClientW") or 0) + tol
+            if out or hidden:
+                j.fail("tab-bar-narrow-reach", dict(key, out_of_reach=out, bar_overflow=hidden),
+                       {"navScrollW": r.get("navScrollW"), "navClientW": r.get("navClientW"), "clientW": r.get("clientW"),
+                        "overflowX": r.get("overflowX")})
+    for user, n in counts.items():
+        if len(n) > 1:
+            j.fail("tab-bar-narrow-measured", {"user": user, "problem": "the number of tabs differs between widths",
+                                               "tabs": sorted(n)})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1287,6 +1340,8 @@ def judge(driver, rows, ctx=None):
         return judge_rebuild_menu(rows, ctx)
     if driver == "badges":
         return judge_badges(rows, ctx)
+    if driver == "tab-bar-narrow":
+        return judge_tab_bar_narrow(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

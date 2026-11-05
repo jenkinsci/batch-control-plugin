@@ -8,7 +8,9 @@ A one-item window on a folder (D-71, replaces the D-65 folder-only check): folde
 B overview badges only (R4-6/D-67): no table/alert, badge counts equal the list rows; #31 (r9/s76.py): every shown tab
   badge carries a tooltip naming its number, a tab without a badge none (admin, requester, approver-1, manager,
   reqonly, approver-2, approver-unlisted, auditor; ci/h1_rules.py "badges")
-C tab look (R4-7): our tab bar vs core's new build page tabs
+C tab look (R4-7): our tab bar vs core's new build page tabs; #31 (r11/s_tabs.py #2): at 1024 and 800 px the bar on
+  /batch-control/ (admin, approver-1) may wrap but neither scrolls the page sideways nor puts a tab out of reach
+  (ci/h1_rules.py "tab-bar-narrow")
 D model-link (R4-11): dashboard, request detail, activation list/detail; chevron opens core's menu
 E dashboard 50 + History links (R4-13)
 F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; footers; no horizontal scroll at 1280
@@ -380,6 +382,41 @@ def sec_C():
     s.page.locator("tr", has_text="new-build-page.flag").locator("select").select_option(index=0)
     s.page.click("button[name=Submit]"); s.page.wait_for_load_state("load")
     s.done()
+    narrow_tabs()
+
+
+# #31 (the retired r11/s_tabs.py #2; e2e-11 R4-7 "wraps to 2 rows at 1024 and 800, with no horizontal scroll"): the tab
+# bar at narrow widths, on the overview (tabs and badges only, so a sideways scroll there can only come from the bar).
+# Every tab's box, the bar's own overflow and the document's scroll width are read; judged by ci/h1_rules.py
+# ("tab-bar-narrow").
+NARROW_JS = """() => { const n = document.querySelector('nav[data-batch-control-tabs]'); const de = document.documentElement;
+  if (!n) return {nav: false, scrollW: de.scrollWidth, clientW: de.clientWidth, tabs: []};
+  const tabs = [...n.querySelectorAll('a[data-batch-control-tab]')].map(a => { const r = a.getBoundingClientRect();
+    return {tab: a.getAttribute('data-batch-control-tab'), left: Math.round(r.left), right: Math.round(r.right),
+            top: Math.round(r.top), visible: !!(a.offsetWidth || a.offsetHeight) && getComputedStyle(a).visibility !== 'hidden'}; });
+  const nr = n.getBoundingClientRect();
+  return {nav: true, scrollW: de.scrollWidth, clientW: de.clientWidth, navLeft: Math.round(nr.left), navRight: Math.round(nr.right),
+          navH: Math.round(nr.height), navScrollW: n.scrollWidth, navClientW: n.clientWidth, overflowX: getComputedStyle(n).overflowX,
+          rows: new Set(tabs.map(t => t.top)).size, tabs}; }"""
+
+
+def narrow_tabs():
+    rows = []
+    for user in lib.h1.TAB_BAR_NARROW_USERS:
+        s = Session(user)
+        for width in lib.h1.TAB_BAR_NARROW_WIDTHS:
+            s.page.set_viewport_size({"width": width, "height": 900})
+            resp = s.go("/batch-control/")
+            row = {"user": user, "width": width, "status": resp.status if resp else None}
+            try:
+                row.update(s.page.evaluate(NARROW_JS))
+            except Exception as e:  # noqa: recorded; a row without tabs fails tab-bar-narrow-measured
+                row["error"] = str(e)[:200]
+            rows.append(row)
+            lib.log("round3", dict(row, sec="C", what="tab bar at a narrow width"))
+            s.page.screenshot(path=str(lib.SHOTS / f"R3-C-{user}-overview-{width}.png"))
+        s.done()
+    lib.h1.report("tab-bar-narrow", rows)
 
 
 # ---------------------------------------------------------------- D, E

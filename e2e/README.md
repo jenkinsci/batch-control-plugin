@@ -111,7 +111,10 @@ references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`dest
 (`rebuild-menu`) and `r14/round3.py` B (`badges`: on `/batch-control/` as admin, requester, approver-1, manager,
 reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carries a non-empty tooltip, core's
 `l:badge` `tooltip` attribute, that contains its number, and a tab without a badge carries none; the wording is not
-judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), next to #129's `helpcheck.py` layout and
+judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), `r14/round3.py` C (`tab-bar-narrow`: on
+`/batch-control/` as admin and approver-1 at 1024 and 800 px the tab bar may wrap, but the page does not scroll
+sideways, every tab is shown inside the viewport and the bar has no hidden overflow of its own:
+`tab-bar-narrow-scroll`, `tab-bar-narrow-reach`, `tab-bar-narrow-measured`), next to #129's `helpcheck.py` layout and
 `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
