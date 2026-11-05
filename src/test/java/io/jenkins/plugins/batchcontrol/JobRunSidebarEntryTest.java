@@ -141,7 +141,7 @@ public class JobRunSidebarEntryTest {
 
     /**
      * T-06-112 (SPEC 6: "Build Now" is replaced by "Request Run" on the sidebar of a job <em>subject
-     * to approval</em>, so not on any other; #31, e2e script rest-screens.sh #3): with run control on,
+     * to approval</em>, so not on any other; #31, retired e2e script rest-screens.sh #3): with run control on,
      * u1 opens {@code free-x}, whose job property has {@code approvalRequired} off, and {@code bare-x},
      * which carries no Batch Control job property. Each page offers core's "Build Now" entry at the
      * job's {@code build} URL, no "Request Run" entry, no "Direct Build (needs approval)" caption and

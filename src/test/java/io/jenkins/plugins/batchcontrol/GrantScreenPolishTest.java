@@ -151,7 +151,7 @@ public class GrantScreenPolishTest {
     }
 
     /**
-     * T-UI-302 (screen contract; e2e/r9/checklist.py: "selects jenkins-select"): every {@code select}
+     * T-UI-302 (screen contract; the retired driver e2e/r9/checklist.py looked for "selects jenkins-select"): every {@code select}
      * of u1's grant form, on the page ({@code grants/new}) and in the dialog ({@code grants/dialog}),
      * is core's {@code jenkins-select} (the class {@code jenkins-select} or
      * {@code jenkins-select__input} on the select or an ancestor inside the form). Premise: the form

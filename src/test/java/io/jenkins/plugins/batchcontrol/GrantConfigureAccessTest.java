@@ -235,7 +235,7 @@ public class GrantConfigureAccessTest {
     /**
      * T-08-292 (SPEC 6 D-34: to run a locked job "turn the switch off in the job configuration; that
      * change is change-controlled, so it goes through a permission window and the records"; SPEC 3
-     * job property; #31, e2e script rest-grant-configure.sh #5; T-CFG-15 checks the administrator's
+     * job property; #31, retired e2e script rest-grant-configure.sh #5; T-CFG-15 checks the administrator's
      * form only): with run control on and {@code batch-x} carrying approvalRequired and blockTimer on
      * and blockUpstream off, u1 is refused the configure screen before the window (premise); inside
      * a CONFIGURE window the screen's config form carries the Batch Control section ("Require approval

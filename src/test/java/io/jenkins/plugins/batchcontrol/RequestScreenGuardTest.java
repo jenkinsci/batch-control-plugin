@@ -127,7 +127,7 @@ public class RequestScreenGuardTest {
 
     /**
      * T-05-208 (SPEC 5: the approver decides on the request; SPEC 6 usability: recorded history names
-     * who did what; T-E2E-05, e2e script rest-screens.sh): the designated approver a1 opens u1's PENDING
+     * who did what; T-E2E-05, retired e2e script rest-screens.sh): the designated approver a1 opens u1's PENDING
      * request page; its summary table has one row headed "Requester" whose cell reads {@code u1}. Guard:
      * on u2's request, viewed by the same a1, the cell reads {@code u2}, so it is the request's
      * requester and not the viewer or a constant.
@@ -143,7 +143,7 @@ public class RequestScreenGuardTest {
     }
 
     /**
-     * T-UI-298 (screen contract, e2e/r6/s4d.py and e2e/r7/n_classic.py): u1's Request Run form of
+     * T-UI-298 (screen contract, retired drivers e2e/r6/s4d.py and e2e/r7/n_classic.py): u1's Request Run form of
      * {@code batch-x} is titled {@code Request Run - batch-x} (core's " - Jenkins" suffix removed); its
      * {@code h1} headings in the main panel name the form ("Request Run") and the job ({@code batch-x});
      * its last breadcrumb reads "Request Run" and the one before it links the job. Checked on the
@@ -164,7 +164,7 @@ public class RequestScreenGuardTest {
     /**
      * T-05-209 (SPEC 5: a reason is required; SPEC 6 usability: "invalid input is refused with a message
      * next to the field and the user's input is kept"; the grant form's counterpart is T-GAP-344;
-     * e2e/r11/s_rundlg_err.py): in a browser u1 opens the Request Run form of {@code batch-x}, leaves the
+     * retired driver e2e/r11/s_rundlg_err.py): in a browser u1 opens the Request Run form of {@code batch-x}, leaves the
      * reason blank, ticks a2 only and types {@value #TYPED_DATE} into DATE (default
      * {@value #DEFAULT_DATE}), and submits. The answer is HTTP 400 with nothing stored, and the
      * re-rendered form has a2 ticked, a1 not ticked and DATE holding {@value #TYPED_DATE}. Guard: u1

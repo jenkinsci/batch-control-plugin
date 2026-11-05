@@ -363,7 +363,7 @@ public class ApprovalScreenRecentRunsTest {
     }
 
     /**
-     * T-UI-294 (#31, e2e script rest-screens-v2.sh #2; the request page's counterpart of the dashboard
+     * T-UI-294 (#31, retired e2e script rest-screens-v2.sh #2; the request page's counterpart of the dashboard
      * and History columns of RunTableColumnsTest): on a2's view of a PENDING request, the table that
      * follows the heading "Recent Runs of This Job" has the header cells exactly Build, Result, Started,
      * Duration, in that order. Premise: it lists the latest run, #12, so it is the recent-run table and
@@ -384,7 +384,7 @@ public class ApprovalScreenRecentRunsTest {
     }
 
     /**
-     * T-UI-295 (#31, e2e script rest-screens-v2.sh #5; low, the wording is the screen's, note 40): the
+     * T-UI-295 (#31, retired e2e script rest-screens-v2.sh #5; low, the wording is the screen's, note 40): the
      * recent-run size links ({@code ?runs=}) sit in a {@code nav} labelled (aria-labelledby) by an
      * element reading "Runs to show:", and one {@code .jenkins-description} sentence starting with
      * "Showing" names the number of runs shown: 5 by default; 10 and no longer 5 after {@code ?runs=10};
