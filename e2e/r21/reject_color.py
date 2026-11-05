@@ -25,7 +25,11 @@ then clicked: core's confirmation dialog must open, its OK button ("Cancel reque
 computed colour or background is the probe's: core's destructive dialog type) and its Cancel button not, and Cancel
 must close the dialog and change nothing (the request still pending, the window still conferring Configure). The rows
 are judged by ci/h1_rules.py (driver "destructive": destructive-button, destructive-dialog, destructive-measured; a
-control in DESTRUCTIVE_CONTROLS that was not measured fails). The window is revoked in the clean-up."""
+control in DESTRUCTIVE_CONTROLS that was not measured fails). The window is revoked in the clean-up.
+#31 (the retired r6/s5a.py #5): admin also opens the Batch Control configuration page, presses the Advanced button of
+the form item that holds "Revert to the plain strategy" (D1 #18.7 keeps the entry behind it) and measures that entry
+the same way; Cancel must leave the Batch Control strategy installed (server state: the class of the installed
+authorization strategy). OK is never pressed here (r27/titles_revert.py reverts through it)."""
 import json
 import sys
 
@@ -175,15 +179,20 @@ def pending(path, rid):
     return r.status_code == 200 and ("Pending" in r.text or "PENDING" in r.text)
 
 
-def destructive(user, where, url, sel, control, state):
+def destructive(user, where, url, sel, control, state, prepare=None):
     """One control of section D: measured, clicked, its dialog measured and dismissed with Cancel; `state()` reads the
-    server state before and after as a boolean (the request pending, the window conferring): True both times."""
+    server state before and after as a boolean (the request pending, the window conferring): True both times.
+    `prepare(page, sel)`, when given, runs after the page loaded and before the control is measured (the revert entry
+    sits behind core's Advanced button); what it returns is recorded as "prepared"."""
     row = {"where": where, "control": control, "user": user, "page": url}
     s = Session(user)
     resp = s.go(url)
     p = s.page
     p.mouse.move(0, 0)
     row["http"] = resp.status if resp else None
+    if prepare:
+        row["prepared"] = prepare(p, sel)
+        p.mouse.move(0, 0)
     row.update(p.evaluate(CONTROL, sel))
     row["state_before"] = state()
     if row.get("button"):
@@ -233,7 +242,39 @@ def destructive_controls():
                     f"#main-panel a.confirmation-link[data-url$='active/{gid}/revoke']", "Revoke", window_confers)
         destructive("admin", "window", f"/batch-control/grants/{gid}/",
                     f"#main-panel a.confirmation-link[data-url$='/grants/{gid}/revoke']", "Revoke", window_confers)
+    destructive("admin", "configuration page", "/manage/batch-control-configuration/",
+                f"#main-panel a.confirmation-link[data-url$='/manage/{REVERT}']", "Revert to the plain strategy",
+                batch_control_strategy, prepare=open_advanced)
     lib.h1.report("destructive", ROWS)
+
+
+# #31 (r6/s5a.py #5): the revert entry of the configuration page (config.jelly: l:confirmationLink inside f:advanced)
+REVERT = "administrativeMonitor/batch-control-strategy/revert"
+ADVANCED_JS = r"""(sel) => {
+  const c = document.querySelector(sel);
+  const body = c && c.closest('.advancedBody');
+  const btn = body && body.parentElement && body.parentElement.querySelector(':scope > .advancedLink button.advanced-button');
+  if (btn) btn.setAttribute('data-r21-advanced', '1');
+  return {control: !!c, in_advanced: !!body, button: btn ? btn.textContent.replace(/\s+/g, ' ').trim() : null};
+}"""
+
+
+def open_advanced(p, sel):
+    """Presses the Advanced button of the form item that holds the control (core then moves the rows out of
+    div.advancedBody and shows them); returns what was found and how many matching controls are shown afterwards."""
+    found = p.evaluate(ADVANCED_JS, sel)
+    btn = p.locator("[data-r21-advanced='1']")
+    if btn.count() == 1:
+        btn.scroll_into_view_if_needed()
+        btn.click()
+        lib.L16._l.until(p, lambda: p.locator(sel).filter(visible=True).count() > 0, 3000)
+    found["shown"] = p.locator(sel).filter(visible=True).count()
+    return found
+
+
+def batch_control_strategy():
+    """Server state of the configuration page's row: a Batch Control strategy is still the installed one."""
+    return lib.gv("return jenkins.model.Jenkins.get().getAuthorizationStrategy().getClass().simpleName").startswith("BatchControl")
 
 
 def cleanup():

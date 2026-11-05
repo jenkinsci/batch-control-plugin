@@ -1101,10 +1101,11 @@ def _permalinks_entries(c):
 
 
 # ------------------------------------------------------------------ entry point for the drivers
-# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py)
+# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py, r6/s5a.py #5)
 # The destructive controls section D measures: (where, control). Each must have a row (destructive-measured).
 DESTRUCTIVE_CONTROLS = (("run request", "Cancel Request"), ("permission window request", "Cancel Request"),
-                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"))
+                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"),
+                        ("configuration page", "Revert to the plain strategy"))
 
 
 def _painted(button, probe, probe_n):
@@ -1119,10 +1120,11 @@ def _painted(button, probe, probe_n):
 
 
 def judge_destructive(rows, ctx=None):
-    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"): Cancel Request on the three
-    request pages and Revoke on the grants list and on the window's page render in the theme's destructive colour and
-    open core's destructive confirmation dialog. Colours are compared with a probe styled color: var(--destructive-color)
-    on the same page (reject_color.py D):
+    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"; r6/s5a.py #5): Cancel Request on
+    the three request pages, Revoke on the grants list and on the window's page, and "Revert to the plain strategy" on
+    the Batch Control configuration page (behind core's Advanced button, which the driver presses first) render in the
+    theme's destructive colour and open core's destructive confirmation dialog. Colours are compared with a probe styled
+    color: var(--destructive-color) on the same page (reject_color.py D):
       * destructive-measured: every DESTRUCTIVE_CONTROLS entry has a row, and its probe resolves to a colour of its own
         (it differs from the text around the control; an undefined variable would make every comparison vacuous);
       * destructive-button: the control ("button": a.confirmation-link styled as a button) is on the page, shown, and
@@ -1130,7 +1132,7 @@ def judge_destructive(rows, ctx=None):
       * destructive-dialog: a click opens a dialog whose OK button is red (its computed colour, background or ::before
         background is the dialog's probe: core's .jenkins-button--primary[class*=color]) and whose Cancel button is
         not; Cancel closes it and nothing changed on the server (the request still pending, the window still
-        conferring Configure)."""
+        conferring Configure, a Batch Control strategy still installed)."""
     j = Judge("destructive", ctx)
     seen = {(r.get("where"), r.get("control")) for r in rows}
     for where, control in DESTRUCTIVE_CONTROLS:
@@ -1161,7 +1163,8 @@ def judge_destructive(rows, ctx=None):
         if r.get("closed_on_cancel") is not True:
             problems.append("Cancel did not close the dialog")
         if r.get("state_before") is not True or r.get("state_after") is not True:
-            problems.append("the request is no longer pending or the window no longer confers (or never did)")
+            problems.append("the request is no longer pending, the window no longer confers or the Batch Control strategy "
+                            "is no longer installed (or that never held)")
         if problems:
             j.fail("destructive-dialog", dict(key, problems=problems),
                    {"ok": ok, "cancel": cancel, "probe": dprobe, "state": [r.get("state_before"), r.get("state_after")]})

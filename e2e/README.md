@@ -786,8 +786,12 @@ the requester holds (CONFIGURE on `r21-reject`, approved over REST for D and rev
 clicked: core's confirmation dialog must open, its OK button must be red (its computed colour, background or `::before`
 background, where core paints a button's background, equal to a probe inside the dialog, also compared after a canvas
 normalisation so `oklch(...)` and `rgb(...)` match: core's destructive dialog type) and its Cancel button not, and Cancel
-must close it and change nothing (the request still pending, the window still conferring Configure). The rows are judged by `ci/h1_rules.py`
-(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the five
+must close it and change nothing (the request still pending, the window still conferring Configure). Since #31 (the
+check of the retired `r6/s5a.py` #5) admin also opens `/manage/batch-control-configuration/`, presses the Advanced
+button of the form item that holds "Revert to the plain strategy" (D1 #18.7 keeps the entry behind it) and measures
+that entry the same way; Cancel must leave a Batch Control strategy installed (OK is pressed only by
+`r27/titles_revert.py`). The rows are judged by `ci/h1_rules.py`
+(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the six
 controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
 `-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
 it the shared setup).

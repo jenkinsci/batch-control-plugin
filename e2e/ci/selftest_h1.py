@@ -400,8 +400,8 @@ def _btn(label, color, before, classes):
 
 
 def _destructive(where, control, **change):
-    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke"}[control]
-    r = {"where": where, "control": control, "user": "admin" if control == "Revoke" else "requester", "page": "/batch-control/x/",
+    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke", "Revert to the plain strategy": "Revert to plain strategy"}[control]
+    r = {"where": where, "control": control, "user": "requester" if control == "Cancel Request" else "admin", "page": "/batch-control/x/",
          "http": 200, "probe": RED, "around": TEXT, "count": 1,
          "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
                     "classes": "jenkins-button jenkins-!-destructive-color confirmation-link"},
@@ -419,7 +419,7 @@ def _destructive(where, control, **change):
 
 
 def _destructive_rows(drop=None, **changes):
-    """All five D rows; `changes` maps a row's where (spaces as _) to its changes."""
+    """All six D rows; `changes` maps a row's where (spaces as _) to its changes."""
     return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
 
 
@@ -762,6 +762,17 @@ def synthetic():
         ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
          "destructive-measured"),
         ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
+        # #31 (r6/s5a.py #5): the configuration page's "Revert to the plain strategy", revealed behind Advanced
+        ("destructive: #31 the revert's dialog not destructive (OK in the accent colour)", "destructive",
+         _destructive_rows(configuration_page={"dialog": {"ok": _btn("Revert to plain strategy", WHITE, ACCENT,
+                                                                     "jenkins-button jenkins-button--primary")}}),
+         {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the revert entry still hidden behind Advanced (not shown, no click)", "destructive",
+         _destructive_rows(configuration_page={"button": {"visible": False}, "dialog": None}), {}, "fail", "destructive-button"),
+        ("destructive: #31 Cancel in the revert dialog reverted the strategy", "destructive",
+         _destructive_rows(configuration_page={"state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the revert entry not measured", "destructive", _destructive_rows(drop="configuration page"), {},
+         "fail", "destructive-measured"),
         # #31 (r8/rebuild.py): Rebuild Last from the new job page's More actions (gate.py L)
         ("rebuild-menu: #31 offered with its URL, refused, nothing queued, recorded", "rebuild-menu", [_rebuild()], {}, "pass", None),
         ("rebuild-menu: #31 DEF-06: the menu stays empty", "rebuild-menu",
