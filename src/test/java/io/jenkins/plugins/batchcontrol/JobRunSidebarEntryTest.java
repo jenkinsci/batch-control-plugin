@@ -8,10 +8,13 @@ import hudson.model.StringParameterDefinition;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
@@ -136,6 +139,61 @@ public class JobRunSidebarEntryTest {
         assertFalse(jobPage("u1", pipeline).asNormalizedText().contains("Build with Parameters"), "core's parameterised build caption must be replaced as well");
     }
 
+    /**
+     * T-06-112 (SPEC 6: "Build Now" is replaced by "Request Run" on the sidebar of a job <em>subject
+     * to approval</em>, so not on any other; #31, e2e script rest-screens.sh #3): with run control on,
+     * u1 opens {@code free-x}, whose job property has {@code approvalRequired} off, and {@code bare-x},
+     * which carries no Batch Control job property. Each page offers core's "Build Now" entry at the
+     * job's {@code build} URL, no "Request Run" entry, no "Direct Build (needs approval)" caption and
+     * no link to the job's request form ({@code batch-control/}); u1's POST of that build URL (crumb)
+     * runs the job once. Guard: on the same instance the approval-required {@code plain-x} shows
+     * "Request Run" and no "Build Now", so the run-control decoration is on and the difference is the
+     * job's setting. T-UI-17 covers the run-control-off case.
+     */
+    @Test
+    public void t_06_112_jobWithoutApprovalKeepsBuildNowWhileRunControlIsOn() throws Exception {
+        assertTrue(cfg.isRunControlEnabled(), "premise: run control is on");
+        FreeStyleProject free = j.createFreeStyleProject("free-x");
+        BatchControlFixtures.setBatchControl(free, new BatchControlJobProperty(false));
+        assertFalse(free.getProperty(BatchControlJobProperty.class).isApprovalRequired(), "fixture: free-x does not ask for approval");
+        FreeStyleProject bare = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("bare-x"));
+
+        HtmlPage controlled = jobPage("u1", job);
+        assertEquals(1, captionedEntries(controlled, REQUEST_RUN).size(), "guard: the approval-required plain-x offers Request Run");
+        assertTrue(captionedEntries(controlled, BUILD_NOW).isEmpty(), "guard: the approval-required plain-x offers no Build Now");
+
+        for (FreeStyleProject target : List.of(free, bare)) {
+            String name = target.getFullName();
+            HtmlPage page = jobPage("u1", target);
+            String buildPath = new URL(j.getURL(), target.getUrl() + "build").getPath();
+            List<HtmlAnchor> buildNow = captionedEntries(page, BUILD_NOW);
+            assertFalse(buildNow.isEmpty(), name + ": core's Build Now entry must stay while run control is on: "
+                    + excerpt(page.asNormalizedText()));
+            for (HtmlAnchor a : buildNow) {
+                assertEquals(buildPath, page.getFullyQualifiedUrl(a.getHrefAttribute()).getPath(),
+                        name + ": Build Now must stay core's build link");
+            }
+            assertTrue(captionedEntries(page, REQUEST_RUN).isEmpty(), name + ": no Request Run entry on a job that needs no"
+                    + " approval: " + hrefs(captionedEntries(page, REQUEST_RUN)));
+            assertFalse(page.asNormalizedText().contains(DIRECT_BUILD), name + ": core's entry must not be relabelled");
+            String formPath = new URL(j.getURL(), target.getUrl() + "batch-control/").getPath();
+            for (HtmlAnchor a : page.getAnchors()) {
+                String href = a.getHrefAttribute();
+                if (!href.isEmpty() && !href.startsWith("#") && !href.startsWith("javascript:")) {
+                    assertFalse(page.getFullyQualifiedUrl(href).getPath().equals(formPath),
+                            name + ": no link to the request form may be offered: " + a.asXml());
+                }
+            }
+
+            JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
+            int code = wc.getPage(new WebRequest(wc.createCrumbedUrl(target.getUrl() + "build"),
+                    HttpMethod.POST)).getWebResponse().getStatusCode();
+            assertTrue(code < 400, name + ": u1's Build Now POST must be accepted, got HTTP " + code);
+            j.waitUntilNoActivity();
+            assertEquals(1, target.getBuilds().size(), name + ": the Build Now POST runs the job once");
+        }
+    }
+
     // ---------------------------------------------------------------- shared assertion
 
     /**
@@ -215,8 +273,8 @@ public class JobRunSidebarEntryTest {
                 + " build submission must answer 303 to the Request Run form (D-60), got HTTP " + answer.getWebResponse().getStatusCode());
         String location = answer.getWebResponse().getResponseHeaderValue("Location");
         assertNotNull(location, target.getFullName() + ": the 303 must carry a Location");
-        java.net.URL to = new java.net.URL(answer.getUrl(), location);
-        assertEquals(new java.net.URL(j.getURL(), target.getUrl() + "batch-control/").getPath(), to.getPath(),
+        java.net.URL to = new URL(answer.getUrl(), location);
+        assertEquals(new URL(j.getURL(), target.getUrl() + "batch-control/").getPath(), to.getPath(),
                 target.getFullName() + ": the redirect must lead to the job's Request Run form: " + location);
         assertTrue(to.getQuery() != null && to.getQuery().contains("p.DATE=" + typed), target.getFullName()
                 + ": the redirect must carry the typed value: " + location);
@@ -239,7 +297,7 @@ public class JobRunSidebarEntryTest {
     private org.htmlunit.Page submitParameters(String userId, String absoluteHref, String date, boolean followRedirects)
             throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
-        HtmlPage formPage = (HtmlPage) wc.getPage(new java.net.URL(absoluteHref));
+        HtmlPage formPage = (HtmlPage) wc.getPage(new URL(absoluteHref));
         org.htmlunit.html.HtmlForm form = formPage.getFormByName("parameters");
         if (date != null) {
             List<org.htmlunit.html.HtmlInput> inputs = form.getByXPath(
