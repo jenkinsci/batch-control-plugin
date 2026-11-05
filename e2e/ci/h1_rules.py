@@ -1438,6 +1438,52 @@ def judge_tab_bar_narrow(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py C (#31, B/section-a #27, A/sa-read #14)
+# The request pages round3.py C reads at narrow widths: (path below /batch-control/, the seed's id in r14/out/ids.json),
+# as their approver, approver-1 (the legacy A-17 user: the Decision section is on the page).
+DETAIL_NARROW_USER = "approver-1"
+DETAIL_NARROW_PAGES = (("requests", "req_pending"), ("grants", "g_pending_job"))
+DETAIL_NARROW_WIDTHS = (1280, 800)
+COMPACT_TABLE = "jenkins-table--small"
+
+
+def judge_detail_narrow(rows, ctx=None):
+    """#31 (the retired B/section-a.mjs #27 and B/audit/sa-read.mjs #14, A-17; e2e-03 G-37 "at 800 px the run and grant
+    request detail pages do not scroll sideways (compact summary)"): round3.py C opens a pending run request's and a
+    pending grant request's page as DETAIL_NARROW_USER at each DETAIL_NARROW_WIDTHS width:
+      * detail-narrow-scroll: the document's scroll width is at most its client width (+ NARROW_TOLERANCE_PX), and the
+        summary table has no hidden overflow of its own and ends inside the viewport;
+      * detail-narrow-compact: the summary table (the main panel's first table) is core's compact table, class
+        jenkins-table--small;
+      * detail-narrow-measured: a row for each page and width that answered 200 in a viewport of that width, with the
+        summary table found (its row headers read)."""
+    j = Judge("detail-narrow", ctx)
+    tol = NARROW_TOLERANCE_PX
+    seen = {(r.get("kind"), r.get("width")): r for r in rows}
+    for kind, _ in DETAIL_NARROW_PAGES:
+        for width in DETAIL_NARROW_WIDTHS:
+            r = seen.get((kind, width))
+            key = {"kind": kind, "width": width}
+            if r is None:
+                j.fail("detail-narrow-measured", dict(key, row="missing"))
+                continue
+            t = r.get("table")
+            # the client width is the viewport less a vertical scroll bar, if any
+            if (r.get("status") != 200 or not isinstance(t, dict) or not t.get("rows") or not t.get("heads")
+                    or not (width - 20 <= (r.get("clientW") or 0) <= width)):
+                j.fail("detail-narrow-measured", dict(key, status=r.get("status"), table=None if t is None else t.get("rows"),
+                                                      clientW=r.get("clientW")), {"error": r.get("error")})
+                continue
+            cw = r.get("clientW") or 0
+            if ((r.get("scrollW") or 0) > cw + tol or (t.get("scrollW") or 0) > (t.get("clientW") or 0) + tol
+                    or (t.get("right") or 0) > cw + tol):
+                j.fail("detail-narrow-scroll", dict(key, scrollW=r.get("scrollW"), clientW=cw),
+                       {"table": {k: t.get(k) for k in ("left", "right", "width", "scrollW", "clientW")}, "main": r.get("main")})
+            if COMPACT_TABLE not in (t.get("cls") or "").split():
+                j.fail("detail-narrow-compact", dict(key, cls=t.get("cls")))
+    return j
+
+
 # ------------------------------------------------------------------ r14/round3.py F (#31, r9/s89.py #4, r10/s89.py)
 # The users whose grants page must show all three lists (the seed gives requester, and so admin, pending requests,
 # active windows and ended ones); round3.py F measures every user it visits.
@@ -1686,6 +1732,8 @@ def judge(driver, rows, ctx=None):
         return judge_dark(rows, ctx)
     if driver == "month-nav":
         return judge_month_nav(rows, ctx)
+    if driver == "detail-narrow":
+        return judge_detail_narrow(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

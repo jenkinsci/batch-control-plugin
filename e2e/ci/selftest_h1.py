@@ -674,6 +674,27 @@ def _month_rows(changes=None, incidents=None, drop=None, **kw):
     return list(rows.values())
 
 
+def _detail(kind, width, change=None):
+    """round3.py C's detail-narrow row (approver-1, a pending run request or grant request)."""
+    main_left = 96 if width == 1280 else 0
+    r = {"user": "approver-1", "kind": kind, "width": width, "status": 200, "scrollW": width, "clientW": width,
+         "main": {"left": main_left, "right": width - main_left, "width": width - 2 * main_left},
+         "table": {"left": main_left + 20 + (6 if width == 1280 else 0), "right": width - main_left - 20 - (6 if width == 1280 else 0),
+                   "width": width - 2 * main_left - 40 - (12 if width == 1280 else 0), "cls": "jenkins-table jenkins-table--small",
+                   "scrollW": width - 2 * main_left - 45 - (12 if width == 1280 else 0),
+                   "clientW": width - 2 * main_left - 40 - (12 if width == 1280 else 0), "rows": 7 if kind == "requests" else 9,
+                   "heads": ["Job", "Status", "Requester"] if kind == "requests" else ["Scope", "Actions", "Duration"]}}
+    for k, v in (change or {}).items():
+        _set(r, k, v)
+    return r
+
+
+def _detail_rows(drop=None, **changes):
+    """Both pages at both widths; `changes` by "<kind>_<width>", `drop` a (kind, width) left out."""
+    return [_detail(k, w, changes.get(f"{k}_{w}")) for k, _ in h1.DETAIL_NARROW_PAGES for w in h1.DETAIL_NARROW_WIDTHS
+            if (k, w) != drop]
+
+
 PERM_CORE = ["hudson.model.Hudson.Administer", "hudson.model.Hudson.Read", h1.CORE_ITEM_READ, "hudson.model.Item.Build"]
 
 
@@ -1276,6 +1297,24 @@ def synthetic():
         ("month-nav: #31 the Incidents row missing", "month-nav", _month_rows(drop=IN), None, "fail", "month-nav-measured"),
         ("month-nav: #31 « not followed", "month-nav", _month_rows(changes={"prev": None}), None, "fail", "month-nav-measured"),
         ("month-nav: #31 no row at all", "month-nav", [], None, "fail", "month-nav-measured"),
+        # #31 X-25 (round3.py C "detail-narrow"): run and grant request pages at 1280 and 800 px
+        ("detail-narrow: #31 both pages at both widths fit, compact summary", "detail-narrow", _detail_rows(), None, "pass", None),
+        ("detail-narrow: #31 a vertical scroll bar and one pixel of rounding", "detail-narrow",
+         _detail_rows(grants_800={"clientW": 785, "scrollW": 786, "table.right": 766}), None, "pass", None),
+        ("detail-narrow: #31 the grant page scrolls sideways at 800 px", "detail-narrow",
+         _detail_rows(grants_800={"scrollW": 1012, "table.right": 992, "table.width": 972}), None, "fail", "detail-narrow-scroll"),
+        ("detail-narrow: #31 the summary table overflows inside its own box", "detail-narrow",
+         _detail_rows(requests_800={"table.scrollW": 905}), None, "fail", "detail-narrow-scroll"),
+        ("detail-narrow: #31 the run request's summary table is not compact", "detail-narrow",
+         _detail_rows(requests_1280={"table.cls": "jenkins-table"}), None, "fail", "detail-narrow-compact"),
+        ("detail-narrow: #31 the grant page at 800 px not measured", "detail-narrow", _detail_rows(drop=("grants", 800)), None, "fail",
+         "detail-narrow-measured"),
+        ("detail-narrow: #31 the viewport was not narrowed", "detail-narrow",
+         _detail_rows(requests_800={"clientW": 1280, "scrollW": 1280}), None, "fail", "detail-narrow-measured"),
+        ("detail-narrow: #31 the page answered 403", "detail-narrow", _detail_rows(grants_1280={"status": 403}), None, "fail",
+         "detail-narrow-measured"),
+        ("detail-narrow: #31 no summary table found", "detail-narrow", _detail_rows(requests_1280={"table": None}), None, "fail",
+         "detail-narrow-measured"),
         # #31 X-24 (role/manage_roles.py "manage_perms"): the five permissions in Add Role, Request saved on an item role
         ("role: #31 Add Role offers the five permissions, the item role keeps Request", "role/manage_perms", [_perms()], None, "pass",
          None),

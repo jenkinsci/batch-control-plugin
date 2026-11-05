@@ -20,7 +20,7 @@ F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; foote
 G revoke on the window's detail page (R4-12): holder sees no Revoke, manager revokes, holder loses access
 H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
-import json, re, sys
+import json, re, sys, time
 from lib import Session, close, api, groovy, BASE, clean, gone, opened, submit_and_wait
 import lib
 
@@ -419,6 +419,42 @@ def narrow_tabs():
             s.page.screenshot(path=str(lib.SHOTS / f"R3-C-{user}-overview-{width}.png"))
         s.done()
     lib.h1.report("tab-bar-narrow", rows)
+    narrow_details()
+
+
+# #31 (the retired B/section-a.mjs #27 and B/audit/sa-read.mjs #14, A-17): a run request's and a grant request's page as
+# their approver reads it, at 1280 and 800 px: the page does not scroll sideways and its summary table (the first table
+# of the main panel: Job or Scope, Status, ...) is core's compact table. Judged by ci/h1_rules.py ("detail-narrow").
+DETAIL_JS = """() => { const de = document.documentElement; const mp = document.querySelector('#main-panel');
+  const t = mp && mp.querySelector('table'); const box = e => { const r = e.getBoundingClientRect();
+    return {left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width)}; };
+  return {scrollW: de.scrollWidth, clientW: de.clientWidth, main: mp ? box(mp) : null,
+          table: t ? Object.assign(box(t), {cls: t.className, scrollW: t.scrollWidth, clientW: t.clientWidth,
+                                            rows: t.querySelectorAll('tbody tr').length,
+                                            heads: [...t.querySelectorAll('tbody tr > th')].slice(0, 3).map(h => h.textContent.trim())}) : null}; }"""
+
+
+def narrow_details():
+    t0 = time.time()
+    ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
+    rows = []
+    s = Session(lib.h1.DETAIL_NARROW_USER)
+    for kind, key in lib.h1.DETAIL_NARROW_PAGES:
+        for width in lib.h1.DETAIL_NARROW_WIDTHS:
+            s.page.set_viewport_size({"width": width, "height": 900})
+            path = f"/batch-control/{kind}/{ids[key]}/"
+            resp = s.go(path)
+            row = {"user": lib.h1.DETAIL_NARROW_USER, "kind": kind, "width": width, "status": resp.status if resp else None}
+            try:
+                row.update(s.page.evaluate(DETAIL_JS))
+            except Exception as e:  # noqa: recorded; a row without the table fails detail-narrow-measured
+                row["error"] = str(e)[:200]
+            rows.append(row)
+            lib.log("round3", dict(row, sec="C", what="detail page at a narrow width"))
+            s.page.screenshot(path=str(lib.SHOTS / f"R3-C-{kind}-detail-{width}.png"))
+    s.done()
+    lib.log("round3", {"sec": "C", "what": "detail pages measured", "seconds": round(time.time() - t0, 1)})
+    lib.h1.report("detail-narrow", rows)
 
 
 # ---------------------------------------------------------------- D, E
