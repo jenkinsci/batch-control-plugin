@@ -151,11 +151,13 @@ public class GrantScreenPolishTest {
     }
 
     /**
-     * T-UI-302 (screen contract; the retired driver e2e/r9/checklist.py looked for "selects jenkins-select"): every {@code select}
-     * of u1's grant form, on the page ({@code grants/new}) and in the dialog ({@code grants/dialog}),
-     * is core's {@code jenkins-select} (the class {@code jenkins-select} or
-     * {@code jenkins-select__input} on the select or an ancestor inside the form). Premise: the form
-     * has at least one select (the length, {@code durationMinutes}).
+     * T-UI-302 (screen contract; the retired driver e2e/r9/checklist.py looked for "selects
+     * jenkins-select"): every {@code select} of u1's grant form, on the page ({@code grants/new}) and in
+     * the dialog ({@code grants/dialog}), is core's {@code jenkins-select}, which takes both halves of
+     * core's markup: the select itself carries {@code jenkins-select__input} (its appearance and border)
+     * and an ancestor inside the form carries {@code jenkins-select} (the wrapper that draws the
+     * arrow). Either half missing fails. Premise: the form has at least one select (the length,
+     * {@code durationMinutes}).
      */
     @Test
     public void t_ui_302_grantFormSelectsAreJenkinsSelects() throws Exception {
@@ -171,20 +173,28 @@ public class GrantScreenPolishTest {
             assertNotNull(durationSelect(form, path), "premise");
             assertFalse(selects.isEmpty(), path + ": premise: the grant form has a dropdown");
             for (HtmlSelect select : selects) {
-                boolean styled = false;
-                for (DomNode n = select; n instanceof DomElement e && !styled; n = n.getParentNode()) {
-                    styled = (" " + e.getAttribute("class") + " ").matches(".*\\sjenkins-select(__input)?\\s.*");
+                String name = select.getAttribute("name");
+                assertTrue(hasClass(select, "jenkins-select__input"), path + ": the dropdown '" + name + "' must itself carry"
+                        + " core's jenkins-select__input: " + select.getParentNode().asXml());
+                boolean wrapped = false;
+                for (DomNode n = select.getParentNode(); n instanceof DomElement e && !wrapped; n = n.getParentNode()) {
+                    wrapped = hasClass(e, "jenkins-select");
                     if (e == form) {
                         break;
                     }
                 }
-                assertTrue(styled, path + ": the dropdown '" + select.getAttribute("name") + "' must be core's"
-                        + " jenkins-select: " + select.getParentNode().asXml());
+                assertTrue(wrapped, path + ": the dropdown '" + name + "' must sit in core's jenkins-select wrapper inside the"
+                        + " form: " + select.getParentNode().asXml());
             }
         }
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** True when {@code element}'s class attribute holds {@code cls} as a whole token. */
+    private static boolean hasClass(DomElement element, String cls) {
+        return (" " + element.getAttribute("class") + " ").replaceAll("\\s+", " ").contains(" " + cls + " ");
+    }
 
     private static void assertNoWrongCount(String text, String where) {
         assertFalse(ONE_PLURAL.matcher(text).find(), where + ": one minute must read '1 minute', not '1 minutes': "

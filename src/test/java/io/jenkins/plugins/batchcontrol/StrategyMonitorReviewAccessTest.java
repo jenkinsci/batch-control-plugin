@@ -179,7 +179,8 @@ public class StrategyMonitorReviewAccessTest {
      * T-UI-304 (screen contract, e2e-08: "Mark as reviewed" rendered as a {@code jenkins-button}, not a
      * bare link; retired driver r8/monitor.py): on Manage Jenkins the monitor's row for {@code rv-4}
      * offers one review control, which targets {@code markReviewed} for {@code rv-4} (premise) and
-     * carries core's {@code jenkins-button} class (for a form, its submit button).
+     * carries core's {@code jenkins-button} class (for a form, its submit button). The row of an item whose
+     * name no longer resolves is the second method of the row, {@code StrategyMonitorUnresolvedItemTest}.
      */
     @Test
     public void t_ui_304_markAsReviewedIsAButton() throws Exception {
