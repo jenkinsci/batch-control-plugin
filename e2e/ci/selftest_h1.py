@@ -632,6 +632,48 @@ INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
 ]
 
 
+# ---- #31 legacy gaps: rows as a green run on the CI stack records them (2026-11-06)
+CH, IN = "/batch-control/changes/", "/batch-control/incidents/"
+
+
+def _set(row, path, value):
+    """Set a nested key ("prev.month") of a fixture row; value None removes it."""
+    *outer, last = path.split(".")
+    d = row
+    for k in outer:
+        d = d[k]
+    if value is None:
+        d.pop(last, None)
+    else:
+        d[last] = value
+
+
+def _month_row(page, month="2026-11", prev="2026-10", total=173, change=None):
+    """misc.py H's month-nav row of one page; `change` sets nested keys ("prev.rows": 3)."""
+    sentence = h1.MONTH_NAV_PAGES[page][0]
+    changes = page == CH
+    r = {"page": page, "status": 200, "rows": 50 if changes else 2, "month": month, "empty": None,
+         "footer": f"Page 1 ({total} records in {month})" if changes else f"Page 1 (2 incidents in {month})",
+         "prev_href": f"?month={prev}",
+         "prev": {"month": prev, "rows": 0, "footer": None, "empty": sentence.format(m=prev), "url": f"{page}?month={prev}"},
+         "empty_month": {"month": "2016-01", "rows": 0, "footer": None, "empty": sentence.format(m="2016-01"),
+                         "url": f"{page}?month=2016-01", "asked": "2016-01", "status": 200}, "seconds": 0.5}
+    if changes:
+        r["paging"] = {"first_row": "CONFIG_CHANGE batch-control-configuration manager", "older_href": f"?month={month}&page=2",
+                       "page2": {"month": month, "rows": min(50, total - 50), "footer": f"Page 2 ({total} records in {month})",
+                                 "empty": None, "url": f"{page}?month={month}&page=2", "first_row": "CONFIGURE ops/cron-a admin",
+                                 "newer": 1}}
+    for k, v in (change or {}).items():
+        _set(r, k, v)
+    return r
+
+
+def _month_rows(changes=None, incidents=None, drop=None, **kw):
+    rows = {CH: _month_row(CH, change=changes, **kw), IN: _month_row(IN, change=incidents, **kw)}
+    rows.pop(drop, None)
+    return list(rows.values())
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -1179,6 +1221,46 @@ def synthetic():
          [{"kind": "entry", "role": "requester", "ui": "new", "page": "/job/batch-daily/", "where": "main", "label": "Build Now",
            "result": "notified", "notifications": ["Build scheduled"], "console": []}],
          {"ui": "new", "roles": ["requester"], "prefix": PREFIX}, "fail", "notified"),
+        # #31 X-23 (misc.py H "month-nav"): Changes and Incidents month navigation, Changes paging
+        ("month-nav: #31 « to an empty October, an empty month long ago, Changes Older and Newer", "month-nav", _month_rows(),
+         None, "pass", None),
+        ("month-nav: #31 the previous month has records (no empty sentence)", "month-nav",
+         _month_rows(changes={"prev.rows": 12, "prev.empty": None}, incidents={"prev.rows": 1, "prev.empty": None}), None, "pass", None),
+        ("month-nav: #31 « from January goes to December of the year before", "month-nav", _month_rows(month="2027-01", prev="2026-12"),
+         None, "pass", None),
+        ("month-nav: #31 « on Changes skips a month", "month-nav",
+         _month_rows(changes={"prev_href": "?month=2026-09", "prev.url": CH + "?month=2026-09", "prev.month": "2026-09",
+                              "prev.empty": "No change records in 2026-09."}), None, "fail", "month-nav-prev"),
+        ("month-nav: #31 « on Incidents lands on the shown month again", "month-nav",
+         _month_rows(incidents={"prev.url": IN + "?month=2026-10", "prev.month": "2026-11", "prev.empty": "No incidents in 2026-11."}),
+         None, "fail", "month-nav-prev"),
+        ("month-nav: #31 an empty previous month without the empty sentence", "month-nav", _month_rows(incidents={"prev.empty": None}),
+         None, "fail", "month-nav-prev"),
+        ("month-nav: #31 the previous month lists records and still says it has none", "month-nav",
+         _month_rows(changes={"prev.rows": 3}), None, "fail", "month-nav-prev"),
+        ("month-nav: #31 Incidents' empty month says another sentence", "month-nav",
+         _month_rows(incidents={"empty_month.empty": "No incident records in 2016-01."}), None, "fail", "month-nav-empty"),
+        ("month-nav: #31 an empty month shows the current month instead of the asked one", "month-nav",
+         _month_rows(changes={"empty_month.month": "2026-11", "empty_month.rows": 50, "empty_month.empty": None}), None, "fail",
+         "month-nav-empty"),
+        ("month-nav: #31 an empty month with a footer counting nothing", "month-nav",
+         _month_rows(incidents={"empty_month.footer": "Page 1 (0 incidents in 2016-01)"}), None, "fail", "month-nav-empty"),
+        ("month-nav: #31 Changes page 1 of 173 records without Older", "month-nav", _month_rows(changes={"paging.older_href": None}),
+         None, "fail", "month-nav-paging"),
+        ("month-nav: #31 page 2 repeats page 1", "month-nav",
+         _month_rows(changes={"paging.page2.first_row": "CONFIG_CHANGE batch-control-configuration manager"}), None, "fail",
+         "month-nav-paging"),
+        ("month-nav: #31 page 2's footer says page 1", "month-nav",
+         _month_rows(changes={"paging.page2.footer": "Page 1 (173 records in 2026-11)"}), None, "fail", "month-nav-paging"),
+        ("month-nav: #31 page 2 without Newer", "month-nav", _month_rows(changes={"paging.page2.newer": 0}), None, "fail",
+         "month-nav-paging"),
+        ("month-nav: #31 page 1 lists 49 of 173", "month-nav", _month_rows(changes={"rows": 49}), None, "fail", "month-nav-paging"),
+        ("month-nav: #31 the shown month of Changes holds 40 records (no Older to judge)", "month-nav",
+         _month_rows(changes={"rows": 40, "footer": "Page 1 (40 records in 2026-11)", "paging": None}), None, "fail",
+         "month-nav-measured"),
+        ("month-nav: #31 the Incidents row missing", "month-nav", _month_rows(drop=IN), None, "fail", "month-nav-measured"),
+        ("month-nav: #31 « not followed", "month-nav", _month_rows(changes={"prev": None}), None, "fail", "month-nav-measured"),
+        ("month-nav: #31 no row at all", "month-nav", [], None, "fail", "month-nav-measured"),
     ]
 
 

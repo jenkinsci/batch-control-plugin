@@ -129,7 +129,14 @@ its permissions; the card's pattern button lists exactly the items the server ma
 role asks first, Cancel keeps and OK removes the role; the Permission Templates Add Template dialog creates a template
 with the chosen permissions and its card's Delete template, confirmed, removes it; the strategy class is read after
 every step: `role-edit`, `role-pattern-check`, `role-delete`, `template-add`, `template-delete`, `role-edit-measured`,
-`role-edit-requests`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+`role-edit-requests`), `r14/misc.py` H (`month-nav`: on Change Records and Incidents as approver-1 the "«" link opens
+the previous month (`?month=<m-1>`, January to December of the year before) with its month field, saying the empty
+month's sentence exactly when it lists nothing; a month without records, asked for by URL, lists nothing and says "No
+change records in <m>." / "No incidents in <m>." without a footer; Change Records' shown month holds more than 50
+records on the CI stack, so page 1 lists 50 with the footer "Page 1 (<n> records in <m>)" and Older opens page 2 with
+the rest, its own footer, another first row and Newer: `month-nav-prev`, `month-nav-empty`, `month-nav-paging`,
+`month-nav-measured`; Incidents' paging is a JenkinsRule row), next to #129's `helpcheck.py` layout and `s_monitor.py`
+DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no

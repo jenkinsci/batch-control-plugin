@@ -1536,6 +1536,88 @@ def judge_dark(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/misc.py H (#31, B/b11 #9, B/b14 #16, A/b11 #13, A/b14 #17)
+# The month pages misc.py H walks, with the sentence each shows for a month without records (ChangesSection and
+# IncidentsSection index.jelly) and the noun of its page footer ("Page 1 (198 records in 2026-11)").
+MONTH_NAV_PAGES = {"/batch-control/changes/": ("No change records in {m}.", "records?"),
+                   "/batch-control/incidents/": ("No incidents in {m}.", "incidents?")}
+MONTH_PAGE_SIZE = 50  # Paging.PAGE_SIZE
+MONTH_RX = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+
+
+def _prev_month(m):
+    y, mo = int(m[:4]), int(m[5:7])
+    return f"{y - 1}-12" if mo == 1 else f"{y}-{mo - 1:02d}"
+
+
+def judge_month_nav(rows, ctx=None):
+    """#31 (the retired B/b11.mjs #9, B/b14.mjs #16, A/b11.mjs #13, A/b14.mjs #17; SPEC 9 and 11: one month at a time):
+    the month navigation of Change Records and Incidents as approver-1 uses it (misc.py H, one row per page):
+      * month-nav-prev: the "«" link names the month before the shown one (href ?month=<previous>) and opens that month
+        (its URL and its month field); with no record there it says the empty month's sentence for that month, with
+        records it lists them and does not say it;
+      * month-nav-empty: a month without records (ten years before the shown one, asked for by URL) lists nothing and
+        says exactly "No change records in <m>." / "No incidents in <m>." for that month;
+      * month-nav-paging: on Change Records, whose shown month holds more than 50 records on the CI stack, page 1 lists
+        50 and its footer counts them in that month; Older (?month=<m>&page=2) opens page 2 with the rest (at most 50),
+        a footer "Page 2 (<n> records in <m>)", another first row, and Newer;
+      * month-nav-measured: a row for each MONTH_NAV_PAGES page that answered 200 with its month shown and the "«" link
+        followed; the shown month of Change Records lists records (a page that always says "No change records" fails)
+        and more than 50 of them (the premise of Older), measured with page 2 opened."""
+    j = Judge("month-nav", ctx)
+    by_page = {r.get("page"): r for r in rows}
+    for page, (sentence, noun) in MONTH_NAV_PAGES.items():
+        r = by_page.get(page)
+        key = {"page": page}
+        if r is None:
+            j.fail("month-nav-measured", dict(key, row="missing"))
+            continue
+        m = r.get("month") or ""
+        if r.get("status") != 200 or not MONTH_RX.fullmatch(m) or not isinstance(r.get("prev"), dict) \
+                or not isinstance(r.get("empty_month"), dict):
+            j.fail("month-nav-measured", dict(key, status=r.get("status"), month=m, prev="prev" in r, empty_month="empty_month" in r),
+                   {"error": r.get("error")})
+            continue
+        want = _prev_month(m)
+        pv = r["prev"]
+        prev_ok = (r.get("prev_href") == f"?month={want}" and (pv.get("url") or "").endswith(f"{page}?month={want}")
+                   and pv.get("month") == want)
+        if (pv.get("rows") or 0) == 0:
+            prev_ok = prev_ok and pv.get("empty") == sentence.format(m=want)
+        else:
+            prev_ok = prev_ok and pv.get("empty") is None
+        if not prev_ok:
+            j.fail("month-nav-prev", dict(key, shown=m, expected=want),
+                   {"href": r.get("prev_href"), "landing": pv.get("url"), "month": pv.get("month"), "rows": pv.get("rows"),
+                    "empty": pv.get("empty")})
+        em = r["empty_month"]
+        asked = em.get("asked") or ""
+        if not (em.get("status") == 200 and MONTH_RX.fullmatch(asked) and em.get("month") == asked and em.get("rows") == 0
+                and em.get("empty") == sentence.format(m=asked) and em.get("footer") is None):
+            j.fail("month-nav-empty", dict(key, asked=asked),
+                   {k: em.get(k) for k in ("status", "month", "rows", "empty", "footer", "url")})
+        if page != "/batch-control/changes/":
+            continue
+        foot = re.fullmatch(rf"Page 1 \((\d+) {noun} in ({MONTH_RX.pattern})\)", r.get("footer") or "")
+        total = int(foot.group(1)) if foot else 0
+        pg = r.get("paging")
+        if not r.get("rows") or total <= MONTH_PAGE_SIZE or not isinstance(pg, dict):
+            j.fail("month-nav-measured", dict(key, problem="the shown month of Change Records does not hold more than "
+                                                           f"{MONTH_PAGE_SIZE} records, or Older was not measured",
+                                              rows=r.get("rows"), footer=r.get("footer")))
+            continue
+        p2 = pg.get("page2") or {}
+        rest = min(MONTH_PAGE_SIZE, total - MONTH_PAGE_SIZE)
+        if not (foot.group(2) == m and r.get("rows") == MONTH_PAGE_SIZE and pg.get("older_href") == f"?month={m}&page=2"
+                and (p2.get("url") or "").endswith(f"{page}?month={m}&page=2") and p2.get("month") == m
+                and p2.get("rows") == rest and p2.get("footer") == f"Page 2 ({total} records in {m})"
+                and p2.get("first_row") and p2.get("first_row") != pg.get("first_row") and p2.get("newer") == 1):
+            j.fail("month-nav-paging", dict(key, month=m, total=total),
+                   {"rows": r.get("rows"), "older": pg.get("older_href"), "page2": {k: p2.get(k) for k in
+                    ("url", "month", "rows", "footer", "newer")}, "same_first_row": p2.get("first_row") == pg.get("first_row")})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1560,6 +1642,8 @@ def judge(driver, rows, ctx=None):
         return judge_grants_nowrap(rows, ctx)
     if driver == "dark":
         return judge_dark(rows, ctx)
+    if driver == "month-nav":
+        return judge_month_nav(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):
