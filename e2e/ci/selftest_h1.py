@@ -710,6 +710,29 @@ def _perms(**change):
     return res
 
 
+DEPLOY_V = "999999-SNAPSHOT (private-fc8b7263-yongjunhong)"
+
+
+def _deploy(**change):
+    """h3/deploy.py's row as a green run records it (2026-11-06: 33 s)."""
+    after = {"batch-control": {"version": DEPLOY_V, "active": True, "enabled": True},
+             "caffeine-api": {"version": "3.3.1-214.v18eb_56b_34920", "active": True, "enabled": True},
+             "cloudbees-folder": {"version": "6.1107.v31f8955765c8", "active": True, "enabled": True},
+             "commons-lang3-api": {"version": "3.21.0-122.v6a_ea_4fd34049", "active": True, "enabled": True},
+             "ionicons-api": {"version": "94.vcc3065403257", "active": True, "enabled": True}}
+    r = {"hpi": "target/batch-control.hpi", "hpi_version": DEPLOY_V, "boot_seconds": 2, "core": "2.568.3", "before": {},
+         "before_page": 404, "update_center": {"status": 302, "plugins": "2129", "attempts": 1},
+         "upload": {"status": 302, "location": "/pluginManager/updates/"},
+         "jobs": [{"name": n, "status": "Success", "error": ""} for n in
+                  ("commons-lang3-api", "ionicons-api", "cloudbees-folder", "caffeine-api", "batch-control")],
+         "after": after, "failed": "[]", "after_page": 200, "seconds": 33}
+    for k, v in change.items():
+        _set(r, k.replace("__", "."), v)
+    return r
+
+
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -1336,6 +1359,32 @@ def synthetic():
         ("role: #31 addRole answered 500", "role/manage_perms",
          [_perms(requests=["200 GET /manage/role-strategy/manage-roles", "500 POST /role-strategy/strategy/addRole"])], None, "fail",
          "role-bc-perms-measured"),
+        # #31 X-26 (h3/deploy.py "deploy"): Deploy Plugin of the built .hpi on a clean controller
+        ("deploy: #31 the build and its four plugins installed, active after the restart", "deploy", [_deploy()], None, "pass", None),
+        ("deploy: #31 an older core sends the upload to /updateCenter/", "deploy", [_deploy(upload__location="/updateCenter/")], None,
+         "pass", None),
+        ("deploy: #31 batch-control already installed before the upload", "deploy",
+         [_deploy(before={"batch-control": {"version": DEPLOY_V, "active": True, "enabled": True}})], None, "fail", "deploy-clean-before"),
+        ("deploy: #31 /batch-control/ answered before the upload", "deploy", [_deploy(before_page=200)], None, "fail",
+         "deploy-clean-before"),
+        ("deploy: #31 a required plugin missing in the manifest's resolution (caffeine-api 99.0)", "deploy",
+         [_deploy(after={k: v for k, v in _deploy()["after"].items() if k not in ("batch-control", "caffeine-api")},
+                  jobs=[{"name": "batch-control", "status": "Failure", "error": "Failed to dynamically deploy this plugin"}],
+                  failed='["batch-control: Plugin is missing: caffeine-api (99.0)"]', after_page=404)], None, "fail", "deploy-installed"),
+        ("deploy: #31 the update center's release installed instead of the build", "deploy",
+         [_deploy(**{"after__batch-control__version": "1.4.0"})], None, "fail", "deploy-installed"),
+        ("deploy: #31 batch-control installed but disabled", "deploy", [_deploy(**{"after__batch-control__active": False})], None,
+         "fail", "deploy-installed"),
+        ("deploy: #31 ionicons-api not active", "deploy", [_deploy(**{"after__ionicons-api__active": False})], None, "fail",
+         "deploy-installed"),
+        ("deploy: #31 a plugin failed to load", "deploy", [_deploy(failed='["mailer: x"]')], None, "fail", "deploy-installed"),
+        ("deploy: #31 the update center not reachable", "deploy",
+         [_deploy(update_center={"status": 302, "plugins": "none", "attempts": 4})], None, "fail", "deploy-measured"),
+        ("deploy: #31 the upload refused", "deploy", [_deploy(upload={"status": 403, "location": ""}, jobs=[])], None, "fail",
+         "deploy-measured"),
+        ("deploy: #31 the controller did not start", "deploy", [{"error": "RuntimeError('the clean controller did not answer')"}], None,
+         "fail", "deploy-measured"),
+        ("deploy: #31 no row", "deploy", [], None, "fail", "deploy-measured"),
     ]
 
 

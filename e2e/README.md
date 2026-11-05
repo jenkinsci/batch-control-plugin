@@ -142,8 +142,8 @@ has no hidden overflow, ends inside the viewport and is core's compact `jenkins-
 admin under the Batch Control role strategy: Global roles' Add Role offers all five Batch Control permissions and Item
 roles' offers BatchControl/Request, core's Job/Read read in both as the reader's proof; the item role e2e31-bcreq saved
 there with Job/Read and BatchControl/Request is listed after a reload and holds exactly those two on the server, then is
-removed: `role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), next to #129's `helpcheck.py` layout and
-`s_monitor.py` DEF-04 rules.
+removed: `role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), `h3/deploy.py` (`deploy`, see "Deploy Plugin
+driver"), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -404,7 +404,10 @@ itself did not succeed. Its log gives the reason in one line.
   Docker allows it; the Jenkins container gets no extra capability). The unit `h3-upgrade` (gap H3) starts a second
   controller from the same image on `localhost:$((BC_PORT + 100))` (18180) with its own compose project and volume, and
   downloads the released `batch-control.hpi` from updates.jenkins.io (redirected to a get.jenkins.io mirror) unless
-  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`).
+  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`). The unit
+  `h3-deploy` (#31) starts a clean controller from the same image's `jenkins.war` on `localhost:$((BC_PORT + 200))`
+  (18280), container `bc-h3-deploy-<shard>`, and resolves the plugin's required plugins from updates.jenkins.io and
+  its mirrors.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
   the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
@@ -796,6 +799,26 @@ Alone, without a shard: `BC_RELEASED_HPI=... venv/bin/python e2e/h3/upgrade.py` 
 e2e/ci/run.sh 4/7`. Not covered: an upgrade between two different code bases (on 2026-10-31 the release and `main` had
 the same `src/main`, so today the unit guards the next change), Pipeline jobs, folders, file and secret parameters
 (`r19/restart.py` covers those across a restart), role-strategy, a JCasC-configured Batch Control, retention.
+
+## Deploy Plugin driver (`h3/deploy.py`, #31)
+
+CI unit `h3-deploy` (group "admin and role strategy", not `last`, weight 0.8 in `ci/shard.py`; the check of the retired
+`legacy/` B/b21.mjs #1b, README "Installation"). A controller of its own next to the shard's: the image of
+`docker-compose.yml` started with `--entrypoint java ... -jar /usr/share/jenkins/jenkins.war` and an empty JENKINS_HOME,
+so none of the baked plugins of `plugins.txt` is copied in: core 2.568.3 without any plugin, without security and
+without the setup wizard. The driver reads the plugin list and `/batch-control/` (404), presses Check now
+(`pluginManager/checkUpdatesServer`, retried), uploads `target/batch-control.hpi` the way Advanced settings -> Deploy
+Plugin posts it (`pluginManager/uploadPlugin`, file field `name`, empty `pluginUrl`), reads the update center's
+installation jobs until none is pending, restarts (`safeRestart`) and reads the plugin list, `failedPlugins` and
+`/batch-control/` again. Judged by `ci/h1_rules.py` `deploy`: `deploy-clean-before` (neither Batch Control nor
+cloudbees-folder, ionicons-api, caffeine-api installed before), `deploy-installed` (Batch Control at the build's
+`Plugin-Version`, enabled and active, the three required plugins active, no failed installation job or plugin,
+`/batch-control/` 200), `deploy-measured`. Rows in `h3/out/deploy.json`, the controller log in
+`h3/out/deploy-jenkins.log`. 27 to 40 s locally (boot 2 s, Check now 4 s, the upload with four plugins 8 to 20 s, the
+restart 12 s). The container is removed at the end (`BC_KEEP=1` keeps it; `ci/run.sh` removes one a killed step left).
+Proof hook `BC_H3_DEPLOY_HPI=<file>`: another `.hpi`, e.g. one whose manifest requires `caffeine-api:99.0` fails
+`deploy-installed` ("Plugin is missing: caffeine-api (99.0)"); never set in CI. Alone: `venv/bin/python e2e/h3/deploy.py`
+(needs Docker, the image and `target/batch-control.hpi`).
 
 ## e2e-21 driver (`r21/`): Reject button colour
 

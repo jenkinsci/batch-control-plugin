@@ -1706,6 +1706,53 @@ def judge_month_nav(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ h3/deploy.py (#31, B/b21 #1b)
+# README "Requirements": the plugins Batch Control needs, "resolved for you on installation".
+DEPLOY_REQUIRED = ("cloudbees-folder", "ionicons-api", "caffeine-api")
+# where Deploy Plugin sends the browser: the update center's installation status (core 2.568: the Plugins page's Updates)
+DEPLOY_LANDING = re.compile(r"/(updateCenter|pluginManager/updates)/?$")
+
+
+def judge_deploy(rows, ctx=None):
+    """#31 (the retired B/b21.mjs #1b, BT25; README "Installation": "upload a build under Advanced settings -> Deploy
+    Plugin", "Required plugins ... resolved for you on installation"): h3/deploy.py on a clean controller of the core of
+    pom.xml without any plugin:
+      * deploy-clean-before: before the upload neither batch-control nor any of DEPLOY_REQUIRED is installed and
+        /batch-control/ answers 404 (the guard: what the upload installs was not there already);
+      * deploy-installed: after the upload (pluginManager/uploadPlugin, the form's fields) and a restart, batch-control
+        is installed at the uploaded build's version, enabled and active, every DEPLOY_REQUIRED plugin is installed and
+        active, no installation job failed, no plugin failed to load, and /batch-control/ answers 200;
+      * deploy-measured: one row, no driver error, the controller answered, the plugin list was read before and after,
+        the update center's metadata was downloaded (Check now), and the upload was accepted (302 to the installation
+        status, DEPLOY_LANDING) with its installation jobs read."""
+    j = Judge("deploy", ctx)
+    r = rows[0] if len(rows) == 1 else None
+    if r is None:
+        j.fail("deploy-measured", {"rows": len(rows)})
+        return j
+    uc = r.get("update_center") or {}
+    up = r.get("upload") or {}
+    if (r.get("error") or not r.get("boot_seconds") or not isinstance(r.get("before"), dict)
+            or not isinstance(r.get("after"), dict) or not str(uc.get("plugins") or "").isdigit()
+            or int(uc.get("plugins")) == 0 or up.get("status") != 302 or not DEPLOY_LANDING.search(up.get("location") or "")
+            or not r.get("jobs")):
+        j.fail("deploy-measured", {k: r.get(k) for k in ("error", "boot_seconds", "update_center", "upload")}
+               | {"before": isinstance(r.get("before"), dict), "after": isinstance(r.get("after"), dict), "jobs": r.get("jobs")})
+    before = r.get("before") if isinstance(r.get("before"), dict) else {}
+    there = [p for p in ("batch-control",) + DEPLOY_REQUIRED if p in before]
+    if not isinstance(r.get("before"), dict) or there or r.get("before_page") != 404:
+        j.fail("deploy-clean-before", {"installed before": there, "page before": r.get("before_page")})
+    after = r.get("after") if isinstance(r.get("after"), dict) else {}
+    bc = after.get("batch-control") or {}
+    missing = [p for p in DEPLOY_REQUIRED if not (after.get(p) or {}).get("active")]
+    failed_jobs = [x for x in r.get("jobs") or [] if "Failure" in (x.get("status") or "")]
+    if not (bc.get("version") == r.get("hpi_version") and bc.get("active") is True and bc.get("enabled") is True
+            and not missing and not failed_jobs and r.get("failed") == "[]" and r.get("after_page") == 200):
+        j.fail("deploy-installed", {"batch-control": bc, "expected version": r.get("hpi_version"), "required not active": missing,
+                                    "failed jobs": failed_jobs, "failed plugins": r.get("failed"), "page after": r.get("after_page")})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1734,6 +1781,8 @@ def judge(driver, rows, ctx=None):
         return judge_month_nav(rows, ctx)
     if driver == "detail-narrow":
         return judge_detail_narrow(rows, ctx)
+    if driver == "deploy":
+        return judge_deploy(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

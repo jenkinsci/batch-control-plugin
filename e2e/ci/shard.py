@@ -502,6 +502,15 @@ UNITS = [
              "strategy, configuration, every request, window, activation, incident, page status and CSV row as before) "
              "and keeps working: the queued approved run starts once, the activated cron job's timer fires after the "
              "upgrade (SPEC 6a), the pending request runs, the window still confers, pending requests can be decided"),
+    # #31 (the retired B/b21.mjs #1b): Deploy Plugin of target/batch-control.hpi on a clean controller of its own (the
+    # core of the e2e image started from its jenkins.war with an empty JENKINS_HOME, port BC_PORT + 200), judged by
+    # ci/h1_rules.py "deploy". It needs the update center, as h3-upgrade does, and never touches the shard's Jenkins, so
+    # it is not `last`. Weight: 27 to 40 s alone (2026-11-06, four local runs: boot 2 s, Check now 4 s, the upload with
+    # its four required plugins 8 to 20 s, the restart 12 s), counted as 0.8 for the runner's network and a slower boot.
+    Unit("h3-deploy", 0.8, [("h3-deploy", py("h3/deploy.py"))], group="admin and role strategy",
+         doc="#31: Deploy Plugin with the built .hpi on a clean controller without plugins installs Batch Control at the "
+             "build's version and resolves cloudbees-folder, ionicons-api and caffeine-api from the update center; after "
+             "a restart all are active and /batch-control/ answers; guard: none was there before"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
