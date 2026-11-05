@@ -695,6 +695,21 @@ def _detail_rows(drop=None, **changes):
             if (k, w) != drop]
 
 
+def _rdc(ui, **change):
+    """round3.py H's request-dialog-cancel row of one dialog."""
+    user, job = {"new": ("requester", "batch-daily"), "classic": ("classic", "batch-pipeline")}[ui]
+    rid = "e504daea-86e0-4af8-b325-187b1e5880ac" if ui == "new" else "84553327-8256-4b63-9e18-0d129e823ab3"
+    r = {"ui": ui, "user": user, "job": job, "reason": f"e2e-31 {ui} request dialog cancel 1793912034697", "stored_before": [],
+         "cancel_buttons": 1, "closed": True, "url_unchanged": True, "posts_on_cancel": [], "stored_after_cancel": [],
+         "landing": f"/batch-control/requests/{rid}/", "stored_after_submit": [f"{rid} PENDING"], "seconds": 1.6}
+    r.update(change)
+    return r
+
+
+def _rdc_rows(new=None, classic=None, drop=None):
+    return [_rdc(ui, **(c or {})) for ui, c in (("new", new), ("classic", classic)) if ui != drop]
+
+
 PERM_CORE = ["hudson.model.Hudson.Administer", "hudson.model.Hudson.Read", h1.CORE_ITEM_READ, "hudson.model.Item.Build"]
 
 
@@ -1338,6 +1353,36 @@ def synthetic():
          "detail-narrow-measured"),
         ("detail-narrow: #31 no summary table found", "detail-narrow", _detail_rows(requests_1280={"table": None}), None, "fail",
          "detail-narrow-measured"),
+        # #31 X-48 (round3.py H "request-dialog-cancel"): the Request Run dialog's Cancel
+        ("request-dialog-cancel: #31 Cancel closes and stores nothing, Submit stores one", "request-dialog-cancel", _rdc_rows(), None,
+         "pass", None),
+        ("request-dialog-cancel: #31 Cancel does not close the dialog", "request-dialog-cancel", _rdc_rows(new={"closed": False}),
+         None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel does not close and the reopen then times out (the red run of 2026-11-06)",
+         "request-dialog-cancel",
+         _rdc_rows(new={"closed": False, "error": "TimeoutError('Locator.click: Timeout 20000ms exceeded.')", "landing": None,
+                        "stored_after_submit": None}), None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel submits the request", "request-dialog-cancel",
+         _rdc_rows(classic={"stored_after_cancel": ["84553327-8256-4b63-9e18-0d129e823ab3 PENDING"],
+                            "posts_on_cancel": ["POST /batch-control/requests/submit"], "url_unchanged": False}), None, "fail",
+         "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel posts to Batch Control", "request-dialog-cancel",
+         _rdc_rows(new={"posts_on_cancel": ["POST /job/batch-daily/batch-control/submit"]}), None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 two Cancel buttons", "request-dialog-cancel", _rdc_rows(new={"cancel_buttons": 2}), None, "fail",
+         "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Submit stores nothing (a dialog that cannot submit)", "request-dialog-cancel",
+         _rdc_rows(new={"landing": "/job/batch-daily/", "stored_after_submit": []}), None, "fail", "request-dialog-cancel-guard"),
+        ("request-dialog-cancel: #31 Submit stores two requests", "request-dialog-cancel",
+         _rdc_rows(classic={"stored_after_submit": ["84553327-8256-4b63-9e18-0d129e823ab3 PENDING", "0d0b2c51-0c32-4b77-a9f5-6c5f4d1c1a11 PENDING"]}),
+         None, "fail", "request-dialog-cancel-guard"),
+        ("request-dialog-cancel: #31 a request with the reason was there before", "request-dialog-cancel",
+         _rdc_rows(new={"stored_before": ["0d0b2c51-0c32-4b77-a9f5-6c5f4d1c1a11 PENDING"]}), None, "fail",
+         "request-dialog-cancel-measured"),
+        ("request-dialog-cancel: #31 the classic dialog not measured", "request-dialog-cancel", _rdc_rows(drop="classic"), None,
+         "fail", "request-dialog-cancel-measured"),
+        ("request-dialog-cancel: #31 the driver raised", "request-dialog-cancel",
+         _rdc_rows(new={"error": "TimeoutError: Request Run not found", "stored_after_cancel": None}), None, "fail",
+         "request-dialog-cancel-measured"),
         # #31 X-24 (role/manage_roles.py "manage_perms"): the five permissions in Add Role, Request saved on an item role
         ("role: #31 Add Role offers the five permissions, the item role keeps Request", "role/manage_perms", [_perms()], None, "pass",
          None),

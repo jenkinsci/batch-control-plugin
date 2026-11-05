@@ -138,12 +138,17 @@ the rest, its own footer, another first row and Newer: `month-nav-prev`, `month-
 `month-nav-measured`; Incidents' paging is a JenkinsRule row), `r14/round3.py` C (`detail-narrow`: a pending run
 request's and a pending grant request's page as approver-1 at 1280 and 800 px do not scroll sideways, the summary table
 has no hidden overflow, ends inside the viewport and is core's compact `jenkins-table--small`: `detail-narrow-scroll`,
-`detail-narrow-compact`, `detail-narrow-measured`), `r14/role/manage_roles.py`'s third part (`role/manage_perms`, as
-admin under the Batch Control role strategy: Global roles' Add Role offers all five Batch Control permissions and Item
-roles' offers BatchControl/Request, core's Job/Read read in both as the reader's proof; the item role e2e31-bcreq saved
-there with Job/Read and BatchControl/Request is listed after a reload and holds exactly those two on the server, then is
-removed: `role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), `h3/deploy.py` (`deploy`, see "Deploy Plugin
-driver"), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+`detail-narrow-compact`, `detail-narrow-measured`), `r14/round3.py` H (`request-dialog-cancel`: the Request Run dialog
+on the new job page of batch-daily as requester and on the classic page of batch-pipeline as classic, filled with a
+reason of its own and an approver: Cancel, the dialog's one Cancel button, closes it on the job page, posts nothing and
+stores no request with that reason; the same dialog submitted stores exactly one PENDING request and lands on its page:
+`request-dialog-cancel`, `request-dialog-cancel-guard`, `request-dialog-cancel-measured`; the page form's Cancel link is
+a JenkinsRule row), `r14/role/manage_roles.py`'s third part (`role/manage_perms`, as admin under the Batch Control role
+strategy: Global roles' Add Role offers all five Batch Control permissions and Item roles' offers BatchControl/Request,
+core's Job/Read read in both as the reader's proof; the item role e2e31-bcreq saved there with Job/Read and
+BatchControl/Request is listed after a reload and holds exactly those two on the server, then is removed:
+`role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), `h3/deploy.py` (`deploy`, see "Deploy Plugin driver"), next
+to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no

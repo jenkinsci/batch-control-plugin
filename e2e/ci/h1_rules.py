@@ -1484,6 +1484,51 @@ def judge_detail_narrow(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py H (#31, A/b4 #4, V/v5 #4)
+# The Request Run dialogs round3.py H opens: (ui, user, job) of the new job page's app bar entry and the classic side
+# panel's entry.
+REQUEST_DIALOG_CANCEL = (("new", "requester", "batch-daily"), ("classic", "classic", "batch-pipeline"))
+
+
+def judge_request_dialog_cancel(rows, ctx=None):
+    """#31 (the retired B/audit/b4.mjs #4 and B/verify/v5.mjs #4; e2e-03 G-36 "Cancel on the Request Run form stores
+    nothing", the dialog half; the page form's Cancel is a link to the job, a JenkinsRule row): round3.py H opens the
+    Request Run dialog on each REQUEST_DIALOG_CANCEL job page, fills a reason unique to the run and ticks approver-1:
+      * request-dialog-cancel: the dialog has exactly one Cancel button; it closes the dialog without leaving the job
+        page, posts nothing to Batch Control and no request with that reason is in the store;
+      * request-dialog-cancel-guard: the same dialog, filled the same way and submitted, lands on the new request's page
+        and the store holds exactly one PENDING request with that reason (a Cancel that only fails to submit because the
+        dialog cannot submit at all would otherwise pass);
+      * request-dialog-cancel-measured: a row for each dialog, with no driver error, no request with the reason before
+        the dialog opened, and every step read."""
+    j = Judge("request-dialog-cancel", ctx)
+    by_ui = {r.get("ui"): r for r in rows}
+    for ui, user, job in REQUEST_DIALOG_CANCEL:
+        r = by_ui.get(ui)
+        key = {"ui": ui, "user": user, "job": job}
+        if r is None:
+            j.fail("request-dialog-cancel-measured", dict(key, row="missing"))
+            continue
+        # the Cancel half is judged whenever it was measured, also when a later step raised
+        cancel_measured = (r.get("user") == user and r.get("job") == job and r.get("stored_before") == []
+                           and isinstance(r.get("closed"), bool) and isinstance(r.get("stored_after_cancel"), list))
+        guard_measured = cancel_measured and isinstance(r.get("stored_after_submit"), list)
+        if r.get("error") or not guard_measured:
+            j.fail("request-dialog-cancel-measured", dict(key, problem="not measured"),
+                   {k: r.get(k) for k in ("error", "user", "job", "stored_before", "closed", "stored_after_cancel",
+                                          "stored_after_submit")})
+        if cancel_measured and not (r.get("cancel_buttons") == 1 and r.get("closed") is True and r.get("url_unchanged") is True
+                                    and r.get("posts_on_cancel") == [] and r.get("stored_after_cancel") == []):
+            j.fail("request-dialog-cancel", key, {k: r.get(k) for k in ("cancel_buttons", "closed", "url_unchanged",
+                                                                        "posts_on_cancel", "stored_after_cancel")})
+        stored = r.get("stored_after_submit") or []
+        if guard_measured and not (DETAIL.fullmatch(r.get("landing") or "") and "/batch-control/requests/" in r.get("landing")
+                                   and len(stored) == 1 and stored[0].endswith(" PENDING")
+                                   and stored[0].split()[0] in r.get("landing")):
+            j.fail("request-dialog-cancel-guard", key, {"landing": r.get("landing"), "stored": stored})
+    return j
+
+
 # ------------------------------------------------------------------ r14/round3.py F (#31, r9/s89.py #4, r10/s89.py)
 # The users whose grants page must show all three lists (the seed gives requester, and so admin, pending requests,
 # active windows and ended ones); round3.py F measures every user it visits.
@@ -1781,6 +1826,8 @@ def judge(driver, rows, ctx=None):
         return judge_month_nav(rows, ctx)
     if driver == "detail-narrow":
         return judge_detail_narrow(rows, ctx)
+    if driver == "request-dialog-cancel":
+        return judge_request_dialog_cancel(rows, ctx)
     if driver == "deploy":
         return judge_deploy(rows, ctx)
     if driver.startswith("role/"):

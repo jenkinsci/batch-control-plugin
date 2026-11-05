@@ -728,6 +728,67 @@ def run_dialog(s, where, tag):
     return url_open, stays, errs, landing
 
 
+# #31 (the retired B/audit/b4.mjs #4 and B/verify/v5.mjs #4, G-36): the Request Run dialog's Cancel closes the dialog
+# and files nothing; the same dialog, filled the same way and submitted, files one request (the guard). Requests are
+# counted in the store by a reason unique to the run (script console), not on a list page. Judged by ci/h1_rules.py
+# ("request-dialog-cancel").
+STORED = """def st = jenkins.model.Jenkins.get().pluginManager.uberClassLoader.loadClass('io.jenkins.plugins.batchcontrol.store.Store')
+    .getMethod('get').invoke(null)
+return groovy.json.JsonOutput.toJson(st.listRunRequests().findAll { it.reason == %s }.collect { it.id + ' ' + it.status })"""
+
+
+def stored_with(reason):
+    out = groovy(STORED % json.dumps(reason)).replace("Result: ", "")
+    try:
+        return json.loads(out)
+    except ValueError:
+        return ["unreadable: " + out[:120]]
+
+
+def cancel_run_dialog(s, where, tag, job):
+    t0 = time.time()
+    reason = f"e2e-31 {tag} request dialog cancel {int(time.time() * 1000)}"
+    row = {"ui": tag, "user": s.user, "job": job, "reason": reason, "stored_before": stored_with(reason)}
+    posts = []
+    s.page.on("response", lambda r: posts.append(f"{r.status} {r.url.replace(BASE, '')}")
+              if r.request.method == "POST" and "/batch-control/" in r.url else None)
+    try:
+        s.page.locator(where, has_text="Request Run").first.click()
+        s.page.wait_for_selector("dialog[open] textarea[name=reason]")
+        url_open = s.page.url
+        d = s.page.locator("dialog[open]").first
+        d.locator("textarea[name=reason]").fill(reason)
+        tick(d, "approvers", "approver-1")
+        cancel = d.get_by_role("button", name="Cancel", exact=True)
+        row["cancel_buttons"] = cancel.count()
+        s.shot("dialog[open]", f"R3-H-{tag}-run-dialog-before-cancel")
+        cancel.first.click()
+        row["closed"] = gone(s.page, timeout=5000)
+        s.page.wait_for_load_state("load")
+        row["url_unchanged"] = s.page.url == url_open
+        row["posts_on_cancel"] = list(posts)
+        row["stored_after_cancel"] = stored_with(reason)
+        if not row["closed"]:  # a Cancel that does not close: close it otherwise, so the guard is still measured
+            s.page.keyboard.press("Escape")
+            if not gone(s.page, timeout=3000):
+                s.page.reload(); s.page.wait_for_load_state("load")
+        # the guard: the same dialog, filled the same way, submitted
+        s.page.locator(where, has_text="Request Run").first.click()
+        s.page.wait_for_selector("dialog[open] textarea[name=reason]")
+        d = s.page.locator("dialog[open]").first
+        d.locator("textarea[name=reason]").fill(reason)
+        tick(d, "approvers", "approver-1")
+        row["landing"] = submit_dialog(s, d, "Submit Request").replace(BASE, "")
+        row["stored_after_submit"] = stored_with(reason)
+    except Exception as e:  # noqa: recorded; a row without the measurements fails request-dialog-cancel-measured
+        row["error"] = repr(e)[:300]
+    for x in row.get("stored_after_submit") or []:  # leave no pending request behind (an identical later one is refused)
+        row.setdefault("cleanup", []).append(api(s.user, f"/batch-control/requests/{x.split()[0]}/cancel", "POST").status_code)
+    row["seconds"] = round(time.time() - t0, 1)
+    lib.log("round3", dict(row, sec="H", what="Request Run dialog Cancel"))
+    return row
+
+
 def grant_dialog(s, where, tag):
     """D-71: the prefill is the item's full name; the kind comes from the name check (no scope type selector)."""
     s.page.locator(where, has_text="Request Change Permission").first.click()
@@ -749,7 +810,11 @@ def grant_dialog(s, where, tag):
 
 def sec_H():
     # new job page: requester, app bar Request Run, overflow menu Request Change Permission
+    cancel_rows = []
     s = Session("requester")
+    s.go("/job/batch-daily/")
+    cancel_rows.append(cancel_run_dialog(s, ".jenkins-app-bar a, .jenkins-app-bar button, [data-testid] button, a, button", "new",
+                                         "batch-daily"))
     s.go("/job/batch-daily/")
     u, stays, errs, landing = run_dialog(s, ".jenkins-app-bar a, .jenkins-app-bar button, [data-testid] button, a, button", "new")
     st = api("requester", re.sub(r"^.*?/batch-control/", "/batch-control/", landing)).status_code
@@ -775,6 +840,8 @@ def sec_H():
 u.addProperty(new jenkins.model.experimentalflags.UserExperimentalFlagsProperty(m)); u.save(); return 'ok'""")
     s = Session("classic")
     s.go("/job/batch-pipeline/")
+    cancel_rows.append(cancel_run_dialog(s, "#tasks a, #tasks button", "classic", "batch-pipeline"))
+    s.go("/job/batch-pipeline/")
     u, stays, errs, landing = run_dialog(s, "#tasks a, #tasks button", "classic")
     check("H", "classic side panel: Request Run dialog, validation, UUID landing", stays and errs and re.search("/requests/" + UUID, landing),
           url_open=u.replace(BASE, ""), errors=errs, landing=landing.replace(BASE, ""))
@@ -794,6 +861,7 @@ u.addProperty(new jenkins.model.experimentalflags.UserExperimentalFlagsProperty(
           pre == ("Folder", "prod") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
     console_ok("H", s, "folder dialog")
     s.done()
+    lib.h1.report("request-dialog-cancel", cancel_rows)
 
 
 # ---------------------------------------------------------------- I
