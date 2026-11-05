@@ -7,6 +7,7 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -22,12 +23,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
@@ -228,6 +233,63 @@ public class GrantConfigureAccessTest {
     }
 
     /**
+     * T-08-292 (SPEC 6 D-34: to run a locked job "turn the switch off in the job configuration; that
+     * change is change-controlled, so it goes through a permission window and the records"; SPEC 3
+     * job property; #31, e2e script rest-grant-configure.sh #5; T-CFG-15 checks the administrator's
+     * form only): with run control on and {@code batch-x} carrying approvalRequired and blockTimer on
+     * and blockUpstream off, u1 is refused the configure screen before the window (premise); inside
+     * a CONFIGURE window the screen's config form carries the Batch Control section ("Require approval
+     * to run"): the approvalRequired, blockTimer and blockUpstream checkboxes showing the stored values
+     * (on, on, off) and the job approver and allowed upstream fields. u1 unticks blockTimer and saves:
+     * the save is accepted and the job carries exactly one Batch Control property with blockTimer off
+     * and approvalRequired still on, so the section is bound and not only drawn.
+     */
+    @Test
+    public void t_08_292_windowHoldersConfigureScreenCarriesTheBatchControlSection() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setRunControlEnabled(true);
+        cfg.save();
+        BatchControlJobProperty stored = new BatchControlJobProperty(true);
+        stored.setBlockTimer(true);
+        stored.setBlockUpstream(false);
+        BatchControlFixtures.setBatchControl(jobX, stored);
+
+        JenkinsRule.WebClient wc = webClient().login("u1");
+        assertEquals(403, status(get(wc, jobX.getUrl() + "configure")), "premise: before the window u1 may not open the configure screen");
+        grantConfigureOnJobX();
+
+        Page page = get(wc, jobX.getUrl() + "configure");
+        assertEquals(200, status(page), "inside the window u1 opens the configure screen");
+        HtmlForm form = configForm((HtmlPage) page);
+        assertNotNull(form, "the configure screen must carry the config form: " + formActions((HtmlPage) page));
+        assertTrue(form.asNormalizedText().contains("Require approval to run"), "the window holder's config form must carry the"
+                + " Batch Control section ('Require approval to run'): " + excerpt(form.asNormalizedText()));
+        Map<String, Boolean> expected = new LinkedHashMap<>();
+        expected.put("approvalRequired", true);
+        expected.put("blockTimer", true);
+        expected.put("blockUpstream", false);
+        for (Map.Entry<String, Boolean> e : expected.entrySet()) {
+            HtmlCheckBoxInput box = checkbox(form, e.getKey());
+            assertNotNull(box, "the window holder's config form must offer the " + e.getKey() + " checkbox");
+            assertEquals(e.getValue(), box.isChecked(), "the " + e.getKey() + " checkbox must show the stored value");
+        }
+        for (String field : new String[] {"jobApproversText", "allowedUpstreamJobsText"}) {
+            assertTrue(UsabilityFixtures.hasField(form, field), "the window holder's config form must offer the " + field + " field");
+        }
+
+        checkbox(form, "blockTimer").setChecked(false);
+        Page saved = j.submit(form);
+        assertTrue(status(saved) < 400, "the window holder's save must be accepted, got HTTP " + status(saved));
+        FreeStyleProject reloaded = j.jenkins.getItemByFullName("batch-x", FreeStyleProject.class);
+        assertEquals(1, reloaded.getProperties().values().stream().filter(p -> p instanceof BatchControlJobProperty).count(),
+                "the saved job must carry exactly one Batch Control property");
+        BatchControlJobProperty after = reloaded.getProperty(BatchControlJobProperty.class);
+        assertFalse(after.isBlockTimer(), "the unticked blockTimer must be saved");
+        assertTrue(after.isApprovalRequired(), "approvalRequired must stay on");
+        assertFalse(after.isBlockUpstream(), "blockUpstream must stay off");
+    }
+
+    /**
      * Fixture control for T-08-14/15: a holder of a plain Item/Configure from the delegate can
      * open and read the configuration. This pins that the assertions above are reachable in this
      * Jenkins version at all, so a failure of T-08-14/15 is a grant problem and not a broken
@@ -248,6 +310,17 @@ public class GrantConfigureAccessTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** The form's checkbox bound to {@code field} (as T-CFG-15 finds it). */
+    private static HtmlCheckBoxInput checkbox(HtmlForm form, String field) {
+        for (DomElement element : form.getElementsByTagName("input")) {
+            String name = element.getAttribute("name");
+            if (element instanceof HtmlCheckBoxInput box && (name.equals("_." + field) || name.endsWith("." + field) || name.equals(field))) {
+                return box;
+            }
+        }
+        return null;
+    }
 
     private JenkinsRule.WebClient webClient() {
         return j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
