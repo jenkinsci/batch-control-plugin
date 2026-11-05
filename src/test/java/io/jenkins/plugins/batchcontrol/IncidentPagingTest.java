@@ -44,8 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The Incidents list pages a month of more than 50 incidents (issue #31, gap X-23, its Incidents paging half,
- * retired legacy drivers browser/audit/b11.mjs #13 and browser/audit/b14.mjs #17). Matrix row T-UI-316 (note
- * 371).
+ * retired legacy drivers browser/b11.mjs #9, browser/b14.mjs #16, browser/audit/b11.mjs #13 and
+ * browser/audit/b14.mjs #17). Matrix row T-UI-316 (note 371).
  *
  * <p>Basis: SPEC 11 (FAILURE results are registered as incidents automatically) and SPEC 12 (a period filter;
  * the Incidents list shows one month, {@code ?month=YYYY-MM}), with the page size of SPEC 10 ("페이지당 50건")
