@@ -1375,6 +1375,93 @@ def judge_grants_nowrap(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/misc.py K (#31, r7/e_dark.py #3, r11/s_dark_monitor.py #2)
+def _n(c):
+    """The canvas-normalised "r,g,b,a" of a measured colour ({raw, n}), or None."""
+    return (c or {}).get("n")
+
+
+def judge_dark(rows, ctx=None):
+    """#31 (the retired r7/e_dark.py #3 and r11/s_dark_monitor.py #2): in the dark theme the Batch Control tables,
+    alerts and current tab take the dark palette, not light colours of their own. "The dark palette" is the theme's own
+    CSS variables, read on the same page by probes (misc.py K, DARK_JS: a span styled with var(--x), as the destructive
+    probe), for the colours core's components take from the theme; colours compare canvas-normalised ("r,g,b,a"):
+      * dark-table: on a Batch Control page every shown .jenkins-table paints var(--table-background); each cell (td) of
+        its first row var(--table-body-background) in var(--text-color), a row header (th) of that row is written in
+        var(--text-color) over the table's background; each column header in var(--table-header-foreground);
+      * dark-alert: every shown .jenkins-alert has a variant (success, info, warning, danger) and paints
+        var(--alert-<variant>-bg-color) in var(--alert-<variant>-text-color);
+      * dark-tab: the current tab of the tab bar is written in var(--text-color) on var(--button-background) (its
+        ::before, where core paints a button's background) and looks different from the other tabs (still marked);
+      * dark-measured: the light theme's variables were read before the switch (row "light"); a dark row for each page
+        misc.py K visits (ctx "pages") that answered 200 with data-theme "dark" and whose --background and --text-color
+        differ from the light ones (the theme really changed the palette, so the comparisons are not light against
+        light); and over all pages at least one table, one alert and one current tab measured."""
+    j = Judge("dark", ctx)
+    light = next((r for r in rows if r.get("phase") == "light"), None)
+    lv = (light or {}).get("vars") or {}
+    if not _n(lv.get("background")) or not _n(lv.get("text")):
+        j.fail("dark-measured", {"light": "missing" if light is None else "no variables"})
+    dark = [r for r in rows if r.get("phase") == "dark"]
+    want = (ctx or {}).get("pages")
+    if not dark or (want is not None and len(dark) != want):
+        j.fail("dark-measured", {"dark rows": len(dark), "pages": want})
+    tables = alerts = tabs = 0
+    for r in dark:
+        page, v = r.get("page"), r.get("vars") or {}
+        key = {"page": page_key(page or "")}
+        if (r.get("status") != 200 or r.get("theme") != "dark" or not _n(v.get("background"))
+                or _n(v.get("background")) == _n(lv.get("background")) or _n(v.get("text")) == _n(lv.get("text"))):
+            j.fail("dark-measured", dict(key, status=r.get("status"), theme=r.get("theme")),
+                   {"background": [_n(lv.get("background")), _n(v.get("background"))], "text": [_n(lv.get("text")), _n(v.get("text"))],
+                    "error": r.get("error")})
+            continue
+        for t in r.get("tables") or []:
+            tables += 1
+            tkey = dict(key, list=t.get("list"))
+            bad = []
+            if _n(t.get("bg")) != _n(v.get("table")):
+                bad.append({"part": "table", "bg": (t.get("bg") or {}).get("raw"), "want": (v.get("table") or {}).get("raw")})
+            for i, c in enumerate(t.get("cells") or []):
+                # a row header (th, the label column of a detail page's table) is left transparent by core, over the
+                # table's own background; its text colour is judged
+                paint = c.get("tag") == "th" or _n(c.get("bg")) == _n(v.get("body"))
+                if not paint or _n(c.get("color")) != _n(v.get("text")):
+                    bad.append({"part": f"cell {i}", "bg": (c.get("bg") or {}).get("raw"), "color": (c.get("color") or {}).get("raw"),
+                                "cls": c.get("cls")})
+            for h in t.get("heads") or []:
+                if _n(h.get("color")) != _n(v.get("head")):
+                    bad.append({"part": f"header {h.get('text')}", "color": (h.get("color") or {}).get("raw")})
+            if bad:
+                j.fail("dark-table", dict(tkey, parts=sorted({b["part"].split()[0] for b in bad})),
+                       {"bad": bad[:4], "want": {k: (v.get(k) or {}).get("raw") for k in ("table", "body", "text", "head")}})
+        for a in r.get("alerts") or []:
+            alerts += 1
+            var = a.get("variant")
+            bg, fg = v.get(f"alert_{var}_bg"), v.get(f"alert_{var}_text")
+            if not var or _n(a.get("bg")) != _n(bg) or _n(a.get("color")) != _n(fg):
+                j.fail("dark-alert", dict(key, variant=var),
+                       {"text": a.get("text"), "bg": (a.get("bg") or {}).get("raw"), "color": (a.get("color") or {}).get("raw"),
+                        "want": [(bg or {}).get("raw"), (fg or {}).get("raw")]})
+        tab = r.get("tab")
+        if tab is not None:
+            cur, other = tab.get("current") or {}, tab.get("other") or {}
+            if not cur:
+                j.fail("dark-tab", dict(key, problem="no current tab"))
+                continue
+            tabs += 1
+            looks = lambda x: (_n(x.get("color")), _n(x.get("before")))  # noqa: E731
+            if _n(cur.get("color")) != _n(v.get("text")) or _n(cur.get("before")) != _n(v.get("button")) or looks(cur) == looks(other):
+                j.fail("dark-tab", dict(key, tab=cur.get("tab")),
+                       {"current": [(cur.get("color") or {}).get("raw"), (cur.get("before") or {}).get("raw")],
+                        "other": [(other.get("color") or {}).get("raw"), (other.get("before") or {}).get("raw")],
+                        "want": [(v.get("text") or {}).get("raw"), (v.get("button") or {}).get("raw")]})
+    if dark and not (tables and alerts and tabs):
+        j.fail("dark-measured", {"tables": tables, "alerts": alerts, "current tabs": tabs,
+                                 "problem": "a kind of element was measured on no page"})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1397,6 +1484,8 @@ def judge(driver, rows, ctx=None):
         return judge_tab_bar_narrow(rows, ctx)
     if driver == "grants-nowrap":
         return judge_grants_nowrap(rows, ctx)
+    if driver == "dark":
+        return judge_dark(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

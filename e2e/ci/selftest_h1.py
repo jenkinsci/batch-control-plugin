@@ -526,6 +526,68 @@ def _wrap_rows(**by_user):
     return [by_user.get(u.replace("-", "_"), _wrap_row(u)) for u in ("admin", "approver-1", "requester", "fonly")]
 
 
+# #31 (r7/e_dark.py #3, r11/s_dark_monitor.py #2): misc.py K rows of the dark palette as main renders them (2026-11-06):
+# the theme's variables read by probes (raw computed value and canvas-normalised "r,g,b,a"), the light ones read before
+# the switch.
+def _col(raw, n):
+    return {"raw": raw, "n": n}
+
+
+DK_VARS = {"background": _col("oklch(0.175 0.013 265)", "14,16,22,255"), "text": _col("oklch(0.98 0.015 265)", "243,249,255,255"),
+           "table": _col("oklch(0.214375 0.014875 265)", "22,25,32,255"), "body": _col("oklch(0.175 0.013 265)", "14,16,22,255"),
+           "head": _col("oklch(0.98 0.015 265)", "243,249,255,255"), "button": _col("oklch(0.7 0.038 265 / 0.075)", "148,161,188,19"),
+           "alert_info_bg": _col("color(srgb 0.323101 0.524981 1.03104 / 0.04)", "77,128,255,10"),
+           "alert_info_text": _col("oklch(0.6513 0.1987 265)", "82,134,255,255"),
+           "alert_warning_bg": _col("color(srgb 1.06081 0.61102 -0.0705559 / 0.04)", "255,153,0,10"),
+           "alert_warning_text": _col("color(srgb 1.03958 0.683781 0.14674)", "255,174,37,255"),
+           "alert_danger_bg": _col("color(srgb 1.03122 0.235419 0.163984 / 0.04)", "255,51,51,10"),
+           "alert_danger_text": _col("oklch(0.6682 0.2393 29.84)", "255,60,42,255")}
+LT_VARS = dict(DK_VARS, background=_col("rgb(254, 254, 254)", "254,254,254,255"), text=_col("oklch(0.05 0.075 256.91)", "1,0,16,255"),
+               table=_col("oklch(0.969994 0.00567106 256.91)", "243,245,249,255"), body=_col("rgb(254, 254, 254)", "254,254,254,255"),
+               head=_col("oklch(0.05 0.075 256.91)", "1,0,16,255"), button=_col("oklch(0.6 0.075 256.91 / 0.075)", "72,96,138,19"))
+WHITE_C, DARK_TEXT_C, NONE_C = _col("rgb(255, 255, 255)", "255,255,255,255"), _col("rgb(26, 26, 26)", "26,26,26,255"), _col("rgba(0, 0, 0, 0)", "0,0,0,0")
+SECONDARY_C = _col("color(srgb 0.670653 0.710117 0.791742)", "171,181,202,255")
+
+
+def _dk_table(lst="pending", **change):
+    v = DK_VARS
+    t = {"list": lst, "bg": v["table"], "cells": [{"tag": "td", "cls": "batch-control-nowrap", "bg": v["body"], "color": v["text"]},
+                                                  {"tag": "td", "cls": "", "bg": v["body"], "color": v["text"]}],
+         "heads": [{"text": "ID", "color": v["head"]}, {"text": "Scope", "color": v["head"]}]}
+    t.update(change)
+    return t
+
+
+def _dk_page(page, tables=(), alerts=(), tab="requests", **change):
+    v = DK_VARS
+    r = {"page": page, "phase": "dark", "status": 200, "theme": "dark", "vars": v, "tables": list(tables), "alerts": list(alerts),
+         "tab": {"current": {"tab": tab, "color": v["text"], "before": v["button"]},
+                 "other": {"tab": "overview", "color": SECONDARY_C, "before": NONE_C}} if tab else None}
+    r.update(change)
+    return r
+
+
+def _dk_alert(variant="warning", **change):
+    a = {"variant": variant, "cls": f"jenkins-alert jenkins-alert-{variant}", "text": "Batch Control: ...",
+         "bg": DK_VARS[f"alert_{variant}_bg"], "color": DK_VARS[f"alert_{variant}_text"]}
+    a.update(change)
+    return a
+
+
+def _dark_rows(**pages):
+    """The light row and three dark pages (a list, a detail page with a warning, core's job page with two alerts);
+    `pages` replaces a page's row by its key (list, detail, job; None drops it)."""
+    rows = {"list": _dk_page("/batch-control/requests/", [_dk_table("pending"), _dk_table("ended")]),
+            "detail": _dk_page("/batch-control/grants/2a126f3e-4d2b-4a56-a088-9b8b82705480/",
+                               [_dk_table(None, cells=[{"tag": "th", "cls": "", "bg": NONE_C, "color": DK_VARS["text"]},
+                                                       {"tag": "td", "cls": "", "bg": DK_VARS["body"], "color": DK_VARS["text"]}],
+                                          heads=[])], [_dk_alert("warning")], tab="grants"),
+            "job": _dk_page("/job/batch-daily/", [], [_dk_alert("info"), _dk_alert("warning")], tab=None)}
+    rows.update(pages)
+    light = {"page": "/user/admin/appearance/", "phase": "light", "theme": "none", "vars": LT_VARS, "tables": [], "alerts": [], "tab": None}
+    return [light] + [r for r in rows.values() if r is not None]
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -942,6 +1004,50 @@ def synthetic():
         ("grants-nowrap: #31 the admin row missing", "grants-nowrap", _wrap_rows()[1:], {}, "fail", "grants-nowrap-measured"),
         ("grants-nowrap: #31 no row at all (section F did not reach the grants page)", "grants-nowrap", [], {}, "fail",
          "grants-nowrap-measured"),
+        # #31 (r7/e_dark.py #3, r11/s_dark_monitor.py #2): the dark palette (misc.py K)
+        ("dark: #31 tables (a detail page's row header left transparent), alerts and the current tab in the dark variables",
+         "dark", _dark_rows(), {"pages": 3},
+         "pass", None),
+        ("dark: #31 a list table with a light background of its own", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", bg=WHITE_C)])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 a table cell painted light (the light theme's --table-body-background kept)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", cells=[
+             {"tag": "td", "cls": "", "bg": LT_VARS["body"], "color": DK_VARS["text"]}])])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 cell text in a dark colour of its own (unreadable on the dark body)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", cells=[
+             {"tag": "td", "cls": "", "bg": DK_VARS["body"], "color": DARK_TEXT_C}])])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 a column header in the light theme's text colour", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", heads=[{"text": "ID", "color": LT_VARS["head"]}])])),
+         {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 an alert with a white background", "dark",
+         _dark_rows(detail=_dk_page("/batch-control/grants/x/", [], [_dk_alert("warning", bg=WHITE_C)], tab="grants")), {"pages": 3},
+         "fail", "dark-alert"),
+        ("dark: #31 an alert's text in a colour of its own", "dark",
+         _dark_rows(job=_dk_page("/job/batch-daily/", [], [_dk_alert("info", color=DARK_TEXT_C)], tab=None)), {"pages": 3},
+         "fail", "dark-alert"),
+        ("dark: #31 an alert without a variant", "dark",
+         _dark_rows(job=_dk_page("/job/batch-daily/", [], [dict(_dk_alert("info"), variant=None, cls="jenkins-alert")], tab=None)),
+         {"pages": 3}, "fail", "dark-alert"),
+        ("dark: #31 the current tab painted white", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={
+             "current": {"tab": "requests", "color": DARK_TEXT_C, "before": WHITE_C},
+             "other": {"tab": "overview", "color": SECONDARY_C, "before": NONE_C}})), {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the current tab looks like the others (not marked)", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={
+             "current": {"tab": "requests", "color": DK_VARS["text"], "before": DK_VARS["button"]},
+             "other": {"tab": "overview", "color": DK_VARS["text"], "before": DK_VARS["button"]}})), {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the bar shows no current tab", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={"current": None, "other": None})),
+         {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the page stayed light (data-theme none, the light variables)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table()], theme="none", vars=LT_VARS)), {"pages": 3},
+         "fail", "dark-measured"),
+        ("dark: #31 no light variables read before the switch", "dark", _dark_rows()[1:], {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 a page of K not measured", "dark", _dark_rows(job=None), {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 no alert on any page (alerts never measured)", "dark",
+         _dark_rows(detail=_dk_page("/batch-control/grants/x/", [_dk_table()], [], tab="grants"),
+                    job=_dk_page("/job/batch-daily/", [], [], tab=None)), {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 no row at all (section K did not run)", "dark", [], {"pages": 16}, "fail", "dark-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],

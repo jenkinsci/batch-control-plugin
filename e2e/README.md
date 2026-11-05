@@ -118,7 +118,12 @@ sideways, every tab is shown inside the viewport and the bar has no hidden overf
 `/batch-control/grants/` at 1280 px, with pending, active and ended entries listed for admin and requester, every
 header and every cell of a short column (ID, User, Requester, Duration, Names, Remaining, the button column) takes one
 line and no other cell but Reason splits a word across lines: `grants-nowrap-header`, `grants-nowrap-short`,
-`grants-nowrap-word`, `grants-nowrap-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+`grants-nowrap-word`, `grants-nowrap-measured`), `r14/misc.py` K (`dark`: in the dark theme every Batch Control
+table, every alert and the current tab paint the theme's own variables, read on the same page by probes styled with
+`var(--x)`: `--table-background`, `--table-body-background`, `--text-color`, `--table-header-foreground`,
+`--alert-<variant>-bg-color`/`-text-color`, `--button-background` on the tab's `::before`; the light variables are read
+before the switch so the comparison is never light against light: `dark-table`, `dark-alert`, `dark-tab`,
+`dark-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no

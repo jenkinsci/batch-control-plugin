@@ -7,7 +7,8 @@ T tab badges against the pending rows they count
 R refusal pages (approval required, grant required, move refusal) and their links
 S strategy monitor: Mark as reviewed, Revert (Cancel/OK), Install (Cancel/OK)
 M job page "Mark as reviewed" (JobRequestAction) and Request again on the grants page
-K dark theme render of every Batch Control page
+K dark theme render of every Batch Control page; #31 (r7/e_dark.py #3, r11/s_dark_monitor.py #2): the tables, alerts
+  and the current tab take the dark theme's palette (ci/h1_rules.py "dark")
 Rows: out/misc.jsonl.
 
 H1 (2026-10-24): the rows are judged at the end (ci/h1_rules.py judge_misc): statuses per role against MISC_STATUS
@@ -592,6 +593,52 @@ def sec_M():
 
 
 # ---------------------------------------------------------------- K
+# #31 (the retired r7/e_dark.py #3 and r11/s_dark_monitor.py #2): what the tables, alerts and the current tab paint, and
+# the theme's own variables on the same page, read by probes (a span appended to the body, styled with var(--x), as
+# r21/reject_color.py's destructive probe): the colours core's components take from the theme (.jenkins-table:
+# --table-background, its cells --table-body-background and --text-color, its headers --table-header-foreground;
+# a row header (th) in the body --text-color over the table's own background; .jenkins-alert-<variant>:
+# --alert-<variant>-bg-color and -text-color; a .jenkins-button tab: --text-color, and
+# --button-background on ::before where core paints a button's background). Colours are also canvas-normalised to
+# "r,g,b,a", so oklch(...) and color(srgb ...) of one colour compare equal. Tables only on the Batch Control pages
+# (/job/batch-daily/ is core's page); alerts on every page. Judged by ci/h1_rules.py ("dark").
+DARK_JS = """() => {
+  const cx = document.createElement('canvas').getContext('2d', {willReadFrequently: true});
+  const norm = c => { if (!c) return null; cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c;
+    cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return `${d[0]},${d[1]},${d[2]},${d[3]}`; };
+  const col = raw => ({raw: raw, n: norm(raw)});
+  const probe = (prop, v) => { const p = document.createElement('span'); p.style.setProperty(prop, v); p.textContent = 'probe';
+    document.body.appendChild(p); const cs = getComputedStyle(p); const c = prop === 'color' ? cs.color : cs.backgroundColor;
+    p.remove(); return col(c); };
+  const VARS = {background: ['background-color', '--background'], text: ['color', '--text-color'],
+    table: ['background-color', '--table-background'], body: ['background-color', '--table-body-background'],
+    head: ['color', '--table-header-foreground'], button: ['background-color', '--button-background']};
+  ['success', 'info', 'warning', 'danger'].forEach(v => { VARS[`alert_${v}_bg`] = ['background-color', `--alert-${v}-bg-color`];
+    VARS[`alert_${v}_text`] = ['color', `--alert-${v}-text-color`]; });
+  const vars = {}; Object.entries(VARS).forEach(([k, [prop, name]]) => { vars[k] = probe(prop, `var(${name})`); });
+  const shown = e => !!(e.offsetWidth || e.offsetHeight);
+  const own = /\\/batch-control(\\/|-configuration\\/)/.test(location.pathname);
+  const tables = own ? [...document.querySelectorAll('#main-panel table.jenkins-table')].filter(shown).map(t => {
+    const row = t.querySelector('tbody tr');
+    return {list: t.getAttribute('data-batch-control-list'), bg: col(getComputedStyle(t).backgroundColor),
+      cells: row ? [...row.children].map(c => ({tag: c.tagName.toLowerCase(), cls: String(c.className),
+                                                 bg: col(getComputedStyle(c).backgroundColor), color: col(getComputedStyle(c).color)})) : [],
+      heads: [...t.querySelectorAll('thead th')].map(th => ({text: th.textContent.trim().slice(0, 20), color: col(getComputedStyle(th).color)}))};
+  }) : [];
+  const alerts = [...document.querySelectorAll('#main-panel .jenkins-alert')].filter(shown).map(a => ({
+    variant: (String(a.className).match(/jenkins-alert-(success|info|warning|danger)/) || [])[1] || null,
+    cls: String(a.className), text: a.textContent.replace(/\\s+/g, ' ').trim().slice(0, 60),
+    bg: col(getComputedStyle(a).backgroundColor), color: col(getComputedStyle(a).color)}));
+  const nav = document.querySelector('nav[data-batch-control-tabs]');
+  const look = a => a && {tab: a.getAttribute('data-batch-control-tab'), color: col(getComputedStyle(a).color),
+    before: col(getComputedStyle(a, '::before').backgroundColor)};
+  const cur = nav && nav.querySelector('a[aria-current]');
+  const other = nav && [...nav.querySelectorAll('a')].find(a => a !== cur);
+  return {theme: document.documentElement.getAttribute('data-theme'), vars: vars, tables: tables, alerts: alerts,
+          tab: nav ? {current: look(cur), other: look(other)} : null};
+}"""
+
+
 def sec_K():
     ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
     pages = ["/batch-control/", "/batch-control/requests/", "/batch-control/activations/", "/batch-control/grants/", "/batch-control/changes/",
@@ -600,7 +647,12 @@ def sec_K():
              f"/batch-control/grants/{ids['g_pending_job']}/", f"/batch-control/grants/{ids['g_active_fonly']}/",
              "/manage/batch-control-configuration/", "/job/batch-daily/batch-control/", "/job/batch-daily/"]
     s = Session("admin")
+    dark_rows = []
     s.go("/user/admin/appearance/")
+    light = {"page": "/user/admin/appearance/", "phase": "light"}
+    light.update(s.page.evaluate(DARK_JS))  # the light theme's variables, before the switch (dark-measured compares)
+    dark_rows.append(light)
+    lib.log("misc", dict(light, sec="K", what="light palette"))
     s.page.locator("input[data-theme=dark]").check(force=True)
     s.page.locator("button[name=Submit]").first.click(); s.page.wait_for_load_state("load")
     for page in pages:
@@ -612,11 +664,19 @@ def sec_K():
         invisible = [b for b in btns if b[1] == b[2] or b[3] < 8 or b[4] < 8]
         emit("K", {"page": page, "status": r.status if r else None, "theme": theme, "buttons": len(btns), "invisible": invisible,
                    "console": [c for c in s.console[nc:] if "MIME" not in c][:3]})
+        row = {"page": page, "phase": "dark", "status": r.status if r else None}
+        try:
+            row.update(s.page.evaluate(DARK_JS))
+        except Exception as e:  # noqa: recorded; a row without the palette fails dark-measured
+            row["error"] = str(e)[:200]
+        dark_rows.append(row)
+        lib.log("misc", dict(row, sec="K", what="dark palette"))
         s.shot("#main-panel", "K-dark-" + re.sub(r"[^a-z0-9]+", "_", page)[:50])
     s.go("/user/admin/appearance/")
     s.page.locator("input[data-theme=none]").check(force=True)
     s.page.locator("button[name=Submit]").first.click(); s.page.wait_for_load_state("load")
     s.done()
+    lib.h1.report("dark", dark_rows, {"pages": len(pages)})
 
 
 for k in WANT:
