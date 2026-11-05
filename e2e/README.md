@@ -458,12 +458,21 @@ replaces the lock with each job's intended property (see the header of
 `20-sample-jobs.groovy`) but deliberately does not activate anything: nothing in
 a job's configuration can. A job that must run unattended is activated through
 the real ACTIVATE request flow (job page -> "Request activation" -> an approver
-approves); the pre-flight does this for `batch-cron` (checklist E-10).
+approves); the e2e-03 pre-flight did this for `batch-cron` (checklist E-10), and
+CI does it for its own `r19-cron` (`r19/triggers.py` T).
 
 The Section E jobs (`batch-cbn`, `batch-rebuild`, `batch-nag`, `batch-token`,
 `batch-lock`, `batch-throttle`, `batch-authz`, `batch-jch`, `batch-up-target`,
-`batch-pt-source`) are created empty; each plugin is configured on them in the
-browser by `legacy/browser/section-e.mjs`, as an administrator would.
+`batch-pt-source`) are created empty; e2e-03 configured each plugin on them in the
+browser, as an administrator would. CI checks the same plugins on the `r19-*` jobs
+that `r19/arrange.py` configures (`r19/plugins.py`, `r19/triggers.py` U).
+
+`init.groovy.d/20-sample-jobs.groovy` runs on the first boot only and leaves
+existing items alone, so a fix to a seed job does not reach a kept `JENKINS_HOME`:
+in the run-3 re-audit `batch-self` still had the pre-fix self-trigger guard and
+looped until its hold was approved; it was corrected by posting the seed's script
+to the existing job. After changing a seed job, either `scripts/reset.sh` or
+update the existing item.
 
 ## Screenshots are local only
 
@@ -561,38 +570,110 @@ What is left in `scripts/` and `r6/`..`r11/` still holds a check that nothing in
 state for such a driver (or for the CI setup steps `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`; `r12/lib.py`
 loads `r6/lib.py`).
 
+The same stage then removed 128 files from `legacy/` on the same terms (the per-check audit of 2026-11-06). The Node
+drivers only logged; a check counted where the report or the checklist row that ran them judged it.
+
+- `browser/` (39). Section A singles `a01`, `a06-a10-header-menu`, `a11-activation-crumbs`, `a13-nobc-direct-build`,
+  `a15`, `a21`, `a22` (their rows are also in the kept `section-a.mjs`): MatrixStrategyTest, T-02-07, T-SEC-77,
+  ActivationBreadcrumbTest, T-06-90, StrategyMigrationTest, T-08-04/05; `r19/gate.py`, `r19/lifecycle.py` D (mails); h1
+  crawl links. Section E, the pre-flight and the HOLD follow-up (`section-e`, `e01-direct-build-toast`, `preflight`,
+  `hold-self`): `r19/plugins.py`, `r19/triggers.py`, the PluginInteraction*Test classes, T-06a-02/23/38; the plugin's
+  Rebuild link is gone (LIMITATIONS 41). Other Section B rows (`b4b` and `b14b`, near-copies of the kept `b4` and `b14`;
+  `b5`, `b5-17b`, `b12`, `b13`, `b15`, `b17`, `b17-04`, `b17-ev`, `b18`, `b18b`, `b19`, `b20`): `r19/gate.py`,
+  `r14/def07.py`, h1 H-kind, `r18/final.py` E (grant mail), `r16/rerun.py`, `r19/restart.py`, `r27/labels_filters.py`,
+  `r23/kill_switch.py`, `r28/grant_blocked.py`; QueueBlockTest, HistoryWebTest, RestartRecoveryTest, DatesClockZoneTest,
+  StrategyCascTest; obsolete D-37, D-38a, D-51, D-67, D-69, D-71. Strategy and window rows (`b7-typing`, `b8`, `b8-r2`,
+  `b8-l3`, `b8-role-404`, `b9`, `b9b`, `b9c`, `b10-mb`): `r16/names.py`, `r19/naming.py`, `r19/guard.py`, `r17/s39.py`,
+  `r14/s_monitor.py`, h1 role; GrantSelfGrantGuardTest, AuthorizationEntryGuardTest, RoleStrategyTest,
+  ActivationComputedFolderTest; obsolete D-35a, D-48, D-71. Arrangement or prints only: `b-kickoff`, `b7-clean`,
+  `offered`, `offered2`, `b8-role-arrange.groovy`.
+- `browser/check30/` (3): `admin-rerun` (T-02-77/80, T-02-189); `rows` and `rows-recheck` only wrote the rubric rows
+  that `reaudit/results.jsonl` keeps.
+- `browser/audit/` (24) and `browser/verify/` (32): the run-3 re-audit and re-verification of the same rows (`a01`,
+  `a01b`, `a02`, `a16`, `a20`, `a21`, `a22`, `b1c`, `b5`, `b521`, `b7`, `b8`, `b904`, `b12`, `b13`, `b15`, `e1`, `e10`,
+  `pr25`, `pr349`; `c3`, `c3b`, `c8`, `c15b`, `c15c`, `c21`, `c23`, `c25`, `c26`, `c27`, `d12`, `docs`, `f5`, `role-r1`,
+  `v1`, `v3`, `v4`, `v8`, `v8b`, `v9`, `v10`): the guards above, plus `r18/final.py` (change records),
+  `r19/lifecycle.py` V (the 4,001-character reason), h1 H-kind, ChangeRecordTest, NotificationTest,
+  GrantSelfGrantFeedbackTest, DecisionAreaTest; obsolete D-35e/g, D-38a, D-48, D-49, D-52, D-56, D-66, D-67, D-71/71c.
+  Probes, dumps and hand-run helpers: `hold`, `pending-start`, `b1rest`, `exp` (expiry: RequestEndStateTest),
+  `d05a`..`d05c`, `explore1`, `f4a`..`f4c`, `role-explore`, `v3b`, and `env.sh`/`env-final.sh` (their variables are
+  under "Re-audit driver").
+- `fresh/` (19) and `fresh/v/` (4): `s1-config`, `s1-install`, `s1-strategy`, `s2-create`, `s2-run`, `s2-expiry`,
+  `s3-activation`, `s4-revoke`, `s5-incident`, `s6-refusals`, `s7-crawl`, `s7-visibility`, `s8-misc`, `rest-grants.sh`,
+  `rest-refusals.sh`, `v/vb-requests`, `v/vb-wait`, `v/vf-misc`, `v/vg-rebuildlast`: `r19/gate.py`, `r19/lifecycle.py`,
+  `r16/rerun.py`, `r16/names.py`, `r27/titles_revert.py`, `r28/rerun_followups.py`, h1 crawl, monitor and misc;
+  ConfigUsabilityTest, ConfigAuditTest, NewJobActivationLockTest, ActivationRequestTest, GrantWebTest,
+  RequestEndStateTest, XssEscapingTest, T-02-07, T-06-110, T-CFG-14; obsolete D-56, D-66, D-72. Also `evidence.mjs`
+  (screenshots), `req-approve.mjs` (a helper) and the outputs `rest-grants.out.txt` and `rest-refusals.out.txt`, which
+  `docs/reports/e2e-04.md` and `e2e-16.md` quote.
+- `extra/` (7): `x1b`, `x1c` (T-03-94, `r28/rerun_followups.py` D), `diff` (a print), and the LDAP drivers `ldap`,
+  `ldap-designate`, `ldap-down-check`, `ldap-down-approve` (T-CFG-07/12, T-GAP-250, GrantMonitorsTest, T-13-14,
+  T-06a-20; staying usable while the directory is down is an accepted loss, #126 L19). The LDAP profile stays for checks
+  by hand ("Other profiles"; `ci/shard.py` and `r22/approver_case.py` name it for R4-01 (b)).
+
+What is left in `legacy/` is listed under "Legacy Node.js drivers".
+
 ## Legacy Node.js drivers (`legacy/`)
 
 e2e-20 moved the Node.js drivers of e2e-01..05 (`browser/`, `extra/`, `fresh/`) to `legacy/`: no CI shard runs them
 (`ci/shard.py` runs only the Python drivers; nothing outside `legacy/` imports or calls them), and the Python drivers
-`r6/` onwards replaced them (`r6/lib.py` is the port of `extra/lib.mjs`). They are kept as the evidence the reports
-e2e-01..05 name, under their old file names below `legacy/`; the reports still give the old paths (`browser/...` is now
-`legacy/browser/...`). Their `lib.mjs` files find `e2e/.env` and `e2e/screenshots/` from the new place; scripts that use
-paths relative to the working directory expect to be started from their own directory, as before.
+`r6/` onwards replaced them (`r6/lib.py` is the port of `extra/lib.mjs`). Stage three of #31 removed every driver whose
+checks CI now asserts (see "Removed drivers"). What is left still holds a check nothing in CI asserts yet (#31), or is
+the library, helper or arrangement such a driver needs; each section below says which check. Several no longer run as
+written (URLs before D-66/D-71, the date-based request ids before D-68, ids of the 2026-09 runs, the broken relative
+paths of `browser/a19.mjs`, `b7.mjs`, `b10.mjs` and `b21.mjs`): they record the check and its expectation for the
+JenkinsRule test or CI step that is to take it over. The reports still give the old paths (`browser/...` is now
+`legacy/browser/...`). The `lib.mjs` files find `e2e/.env` from the new place; scripts that use paths relative to the
+working directory expect to be started from their own directory, as before.
 
 ### Browser driver (`legacy/browser/`)
 
-`lib.mjs` opens a fresh context per account (real login form), outlines the
-relevant element in red and saves a clipped screenshot to
-`screenshots/run-3/<name>.png`; `api()` reads server state with basic auth;
-`groovy()` uses the script console only to arrange or read state. Scenario
-files: `preflight.mjs`, `section-a.mjs`, `section-e.mjs`. Evidence logs go to
-`out/` (git-ignored).
+`lib.mjs` opens a fresh context per account (real login form), outlines the relevant element in red and saves a clipped
+screenshot to `screenshots/run-3/<name>.png` (`BC_SHOTS` names another directory); `api()` reads server state with basic
+auth; `groovy()` uses the script console only to arrange or read state. Evidence logs go to `out/` (git-ignored).
+`package.json` pins Playwright for every driver below `legacy/browser/` (`npm install` once). Left, because each still
+holds a check nothing in CI asserts yet (#31):
+
+- `section-a.mjs` (every Batch Control entry carries a non-empty icon; no Back link on the detail pages and forms; the
+  request and grant detail pages do not scroll sideways at 800 px), `a04.mjs` (dismissing a monitor), `a19.mjs` (no
+  internal reference in help texts, mails and CSV exports).
+- `b1.mjs` (the empty approver list on the grant forms; the custom duration states its maximum; no run record with both
+  switches off), `b1-21.mjs` (a failed save is logged), `b2.mjs` (the permission descriptions), `b3.mjs` and `b6.mjs` (a
+  decided request offers no Change Approvers, Cancel or decision form), `b4.mjs` (newest request first), `b7.mjs`
+  (reason and actions on the grant request page), `b8-role.mjs` (role-strategy's Add Role dialog lists the five
+  permissions), `b10.mjs` (a REST createItem keeps `jobApprovers`; help texts), `b11.mjs` (a folder rename writes RENAME
+  and one MOVE per descendant; Changes paging and month links), `b14.mjs` (Incidents paging and month links), `b21.mjs`
+  (Deploy Plugin on a clean LTS resolves the dependencies).
+- `check30/c08.mjs` (the job page's "changed under a temporary permission window" section), `check30/links.mjs` (no
+  Rebuild Last for a non-administrator when the last run is marked).
+
+### Fresh-pass driver (`legacy/fresh/`)
+
+e2e-04 (the fresh-eyes pass) and its re-verification (`v/`). `lib.mjs` serves both; there is no `package.json` here
+(Playwright comes from a local `legacy/fresh/node_modules`, git-ignored). Left:
+
+- `s2-setjobs.mjs`: arrangement only; it creates or updates the `fresh-*` jobs that every driver here and in `extra/`
+  opens, and nothing else in the repository defines them.
+- `s2-more.mjs` (a decided request offers no decision form; the losing decision's refusal names the status),
+  `s4-grants.mjs` (a window request for a missing item through the form is refused and stores nothing), `s5-history.mjs`
+  and `v/vd-screens.mjs` (the dashboard's User cell names the requester), `v/final-fd.mjs` and `v/ve-refusals.mjs` (a
+  Pipeline `replay/rebuild` of an approval-required job by a Build holder is refused and recorded), `v/va-config.mjs`
+  (the configuration page says which saves are recorded).
+- `v/vh-expiry.mjs` ("Why it expired" on expired activation and grant requests and in their mails) with
+  `v/setup-expiry.mjs`, which files the requests and writes the `out/verify-expiry.json` it reads.
 
 ### Extra checks driver (`legacy/extra/`)
 
-e2e-05 (dark theme, LDAP realm, Back button and two tabs). `extra/lib.mjs` is
-`fresh/lib.mjs` with screenshots going to `screenshots/run-5/` and the LDAP accounts'
-passwords. `theme.mjs` sets the theme through Manage Jenkins -> Appearance (the
-`dark-theme` plugin, baked into the image) and audits every Batch Control screen per
-role with a computed WCAG contrast check (`out/theme-*.json`); `diff.mjs` opens a
-change-record diff. `stale.mjs` (`tabs`, `back`, `double`), `race.mjs` (parallel
-POSTs from a browser session), `x1b.mjs`/`x1c.mjs` (stale change-approvers form).
-`ldap.mjs` (`apply`, `validate up|down`, `who`, `monitor`, `run`, `grant`,
-`down-request`), `ldap-down-check.mjs`, `ldap-down-approve.mjs` and
-`ldap-designate.mjs`; the LDAP-down steps log in first and then stop
-`batch-control-e2e-ldap` themselves, because a new login needs the directory.
-`cd legacy/extra && npm install` once.
+e2e-05 (dark theme, Back button and two tabs). `extra/lib.mjs` is `fresh/lib.mjs` with screenshots going to
+`screenshots/run-5/` (and the passwords of the removed LDAP drivers' accounts); `cd legacy/extra && npm install` once.
+The drivers open the `fresh-*` jobs of `fresh/s2-setjobs.mjs`. Left:
+
+- `stale.mjs` (`tabs`, `back`, `double`) and `race.mjs` (parallel POSTs from a browser session): the refusal of a stale
+  or losing decision names the current status; two identical run requests at the same moment make one request
+  (`race.mjs`).
+- `theme.mjs` (`setup`, `set`, `audit`): sets the theme through Manage Jenkins -> Appearance (the `dark-theme` plugin,
+  baked into the image) and audits every Batch Control screen per role with a computed WCAG contrast check
+  (`out/theme-*.json`); CI judges the dark palette, not the contrast (#123).
 
 ## e2e-06 driver (`r6/`, Python)
 
@@ -664,22 +745,31 @@ from e2e-01/e2e-02; `lib.sh` knows every account above. Four are left (see "Remo
 `grant-setup.sh`). `scripts/cli.sh <user>
 <command>` runs jenkins-cli inside the container (it needs Java 21).
 
-## Re-audit driver (`legacy/browser/audit/`)
+## Re-audit driver (`legacy/browser/audit/`, `legacy/browser/verify/`)
 
-The five-criterion re-audit of run 3 (checklist 0a) lives in `legacy/browser/audit/`:
-one script per section (`e1.mjs`, `e10.mjs`, `sa-read.mjs`, `a02.mjs` ... `b15.mjs`),
-`rec.mjs` appends one JSON line per row (`V G R C E`, verdict, defect) to
-`out/audit.jsonl` (copied to `reaudit/results.jsonl` at each commit; the last line
-per id wins) and `amend.mjs <id> '<json>'` re-appends a row with corrected cells.
-Run with `BC_SHOTS=run-3-audit` so `shot()` writes to `screenshots/run-3-audit/`
-(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`).
+The five-criterion re-audit of run 3 (checklist 0a, `audit/`) and its re-verification rounds (`verify/`; `check30/` is
+the round check30). `audit/rec.mjs` appends one JSON line per row (`{id, roles, V, G, R, C, E, note, defect, round}`) to
+`out/audit.jsonl`; `reaudit/results.jsonl` keeps the rows of those rounds (the last line per id wins). Run with
+`BC_SHOTS=run-3-audit` (`verify/`: `BC_SHOTS=run-3-verify BC_ROUND=verify`, or `run-3-final` and `final`; `check30/`:
+`BC_SHOTS=run-3-check BC_ROUND=check30`). The helpers `rec.mjs`, `restsubmit.mjs`, `mail.mjs`, `helpers-e.mjs` and
+`b14-job.xml` stay for the drivers that use them. Left, because each still holds a check nothing in CI asserts yet
+(#31):
 
-`init.groovy.d/20-sample-jobs.groovy` runs on the first boot only and leaves
-existing items alone, so a fix to a seed job does not reach a kept `JENKINS_HOME`:
-`batch-self` still had the pre-fix self-trigger guard in the re-audit and looped
-until its hold was approved; it was corrected by posting the seed's script to the
-existing job. After changing a seed job, either `scripts/reset.sh` or update the
-existing item.
+- `audit/`: `a03`, `a03b`, `a04c` (a dismissed monitor comes back once re-enabled; no matrix-auth `getAllSids`
+  deprecation warning), `a07` (an action checkbox's label ticks it), `a19` (internal references in help, mail and CSV),
+  `b1a` (no run record with both switches off), `b1b` (a case-variant designated approver; the administrator's own form
+  offers `admin` only with self-approval on; the empty approver list; the duration maximum; help texts), `b1d` (a failed
+  switch save in plain words, and logged), `b2` (permission descriptions), `b3` (the only approver ticked; refusals name
+  the status), `b4` (Cancel on the Request Run form stores nothing; a decided request's page and refusals; newest
+  first), `b6` (an approved run waiting in the queue does not expire), `b9` (the GRANT_VIOLATION text of a copy), `b10`
+  (REST createItem keeps `jobApprovers`; one ACTIVATED record by `(uncontrolled)`; internal references in mails), `b11`,
+  `b14` (folder rename records; Changes and Incidents paging and month links), `sa-read` (icons, Back links, 800 px).
+- `verify/`: `c1` (a job display name with markup shows as text), `c4`, `c11` (the strategy monitor's redirects stay
+  inside Jenkins), `c31` (a refusal names the status), `d`, `d10` (an activated job survives Disable and Enable), `f1`,
+  `f2`, `v2`, `v2b` (Pipeline `replay/rebuild` refused and recorded), `f3` (with change control off a `config.xml`
+  authorization entry is kept), `role-r3` (the monitor names an item-role Create holder; it applies
+  `casc/profile-role-r3.yaml`), `v5` (Cancel on the Request Run form), `v6` (the folder page shows a name-restricted
+  CREATE window), `v7` (no Back link on detail pages; internal references in mails).
 
 ## Faked clock (`faketime/`)
 
