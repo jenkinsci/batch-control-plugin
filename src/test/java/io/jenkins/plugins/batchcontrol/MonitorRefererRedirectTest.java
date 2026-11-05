@@ -7,8 +7,10 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationS
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.stream.Stream;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
@@ -36,11 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * check), SPEC item 8 (the monitor offers to install the matching strategy and to revert it) and SPEC
  * item 2's D-58b line (Mark as reviewed). T-GAP-243 covers {@code markReviewed} of a listed, existing job;
  * this row covers the two strategy actions and a listed name whose item no longer exists (T-02-191,
- * T-GAP-245), with the protocol-relative form {@code //evil.example/x} added. A deleted job leaves the
- * list, so the stale names are made the way T-02-191 and T-GAP-245 make them: the job directories are
- * removed while Jenkins is down.
+ * T-GAP-245), with the protocol-relative form {@code //evil.example/x} and a foreign host whose path lies
+ * under the Jenkins context ({@code http://evil.example/jenkins/manage/}) added. The Location is judged as a
+ * browser follows it (resolved against the request URL), so its scheme, host and port are checked, not
+ * only its path. A deleted job leaves the list, so the stale names are made the way T-02-191 and
+ * T-GAP-245 make them: the job directories are removed while Jenkins is down.
  *
- * <p>The guard (a same-origin Referer {@code <root>manage/} is followed exactly) is a premise from the gap
+ * <p>The guard (a same-origin Referer {@code <Jenkins URL>manage/} is followed exactly, origin included) is a premise from the gap
  * design, not a SPEC sentence: it shows that each action reads the Referer at all, so the refusals of the
  * foreign forms are not the result of a fixed redirect.
  *
@@ -51,8 +55,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MonitorRefererRedirectTest {
 
     private static final String BASE = "manage/administrativeMonitor/" + MONITOR_ID + "/";
+    /** Foreign Referers; the fourth is built per session: a foreign host with a path under the Jenkins context. */
     private static final String[] FOREIGN = {"http://evil.example/steal", "//evil.example/x", "http://x/ y"};
-    private static final String[] STALE = {"stale-1", "stale-2", "stale-3", "stale-4"};
+    private static final String[] STALE = {"stale-1", "stale-2", "stale-3", "stale-4", "stale-5"};
 
     @RegisterExtension
     final JenkinsSessionExtension session = new JenkinsSessionExtension();
@@ -61,15 +66,18 @@ public class MonitorRefererRedirectTest {
      * T-SEC-118 (CLAUDE.md input rule, SPEC 8, SPEC 2 D-58b; #31 gap X-45): with change control on, a
      * build authenticator configured and the plain project matrix installed, the administrator POSTs
      * (crumb, redirects not followed) {@code migrate} and then {@code revert} once with each Referer
-     * {@code http://evil.example/steal}, {@code //evil.example/x} and {@code http://x/ y}: each answer is a
-     * redirect whose Location path starts with the Jenkins root path and contains neither
-     * {@code evil.example} nor {@code x/ y}, and each action takes effect (the Batch Control matrix after
-     * migrate, the plain project matrix after revert). With the Batch Control matrix, four jobs bob changed
+     * {@code http://evil.example/steal}, {@code //evil.example/x}, {@code http://x/ y} and
+     * {@code http://evil.example<context root>manage/} (a foreign host whose path lies under the Jenkins
+     * context): each answer is a redirect whose Location, resolved against the request URL, has Jenkins' own
+     * scheme, host and port and a path under the Jenkins root path, and contains neither
+     * {@code evil.example} nor {@code x/ y}; each action takes effect (the Batch Control matrix after
+     * migrate, the plain project matrix after revert). With the Batch Control matrix, five jobs bob changed
      * under his CONFIGURE window are listed; their directories are removed while Jenkins is down. After
-     * the restart (premise: Manage Jenkins still names them) {@code markReviewed?item=<name>} with each
-     * foreign Referer answers the same way, and every reviewed name leaves the list. Guards: with the
-     * Referer {@code <root>manage/} each of {@code migrate}, {@code revert} and the stale
-     * {@code markReviewed} redirects to exactly that path.
+     * the restart (premise: Manage Jenkins still names them) {@code markReviewed?item=<name>} with each of
+     * the four foreign Referers answers the same way, and every reviewed name leaves the list. Guards: with
+     * the Referer {@code <Jenkins URL>manage/} each of {@code migrate}, {@code revert} and the stale
+     * {@code markReviewed} redirects to exactly that page: Jenkins' own scheme, host and port and the path
+     * {@code <root>manage/}.
      */
     @Test
     public void t_sec_118_monitorActionsNeverRedirectToAForeignReferer() throws Throwable {
@@ -82,20 +90,20 @@ public class MonitorRefererRedirectTest {
             StrategyFixtures.changeControlOn();
             StrategyFixtures.configureBuildAuthenticator();
             r.jenkins.setAuthorizationStrategy(StrategyFixtures.matrix(new ProjectMatrixAuthorizationStrategy()));
-            String root = r.getURL().getPath();
-            String sameOrigin = r.getURL() + "manage/";
+            URL own = r.getURL();
+            String sameOrigin = own + "manage/";
 
-            for (String referer : FOREIGN) {
-                assertStaysInside(post(r, "migrate", null, referer), "migrate", referer, root);
+            for (String referer : foreign(r)) {
+                assertStaysInside(post(r, "migrate", null, referer), "migrate", referer, own);
                 assertSame(BatchControlMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
                         "migrate with Referer '" + referer + "' must install the Batch Control matrix");
-                assertStaysInside(post(r, "revert", null, referer), "revert", referer, root);
+                assertStaysInside(post(r, "revert", null, referer), "revert", referer, own);
                 assertSame(ProjectMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
                         "revert with Referer '" + referer + "' must restore the plain project matrix");
             }
-            assertEquals(root + "manage/", location(post(r, "migrate", null, sameOrigin)), "guard: migrate follows a same-origin Referer");
+            assertFollowsOwnPage(post(r, "migrate", null, sameOrigin), "guard: migrate", own);
             assertSame(BatchControlMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(), "guard: migrated");
-            assertEquals(root + "manage/", location(post(r, "revert", null, sameOrigin)), "guard: revert follows a same-origin Referer");
+            assertFollowsOwnPage(post(r, "revert", null, sameOrigin), "guard: revert", own);
             assertSame(ProjectMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(), "guard: reverted");
 
             r.jenkins.setAuthorizationStrategy(StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy()));
@@ -118,18 +126,19 @@ public class MonitorRefererRedirectTest {
             }
         }
         session.then(r -> {
-            String root = r.getURL().getPath();
+            URL own = r.getURL();
             String listed = manageText(r);
             for (String name : STALE) {
                 assertNull(r.jenkins.getItemByFullName(name), "premise: " + name + " no longer exists");
                 assertTrue(listed.contains(name), "premise (T-02-191): Manage Jenkins still lists the vanished " + name + ": "
                         + UsabilityFixtures.excerpt(listed));
             }
-            for (int i = 0; i < FOREIGN.length; i++) {
-                assertStaysInside(post(r, "markReviewed", "item=" + STALE[i], FOREIGN[i]), "markReviewed of " + STALE[i], FOREIGN[i], root);
+            List<String> foreign = foreign(r);
+            for (int i = 0; i < foreign.size(); i++) {
+                assertStaysInside(post(r, "markReviewed", "item=" + STALE[i], foreign.get(i)), "markReviewed of " + STALE[i],
+                        foreign.get(i), own);
             }
-            assertEquals(root + "manage/", location(post(r, "markReviewed", "item=" + STALE[3], r.getURL() + "manage/")),
-                    "guard: the stale markReviewed follows a same-origin Referer");
+            assertFollowsOwnPage(post(r, "markReviewed", "item=" + STALE[4], own + "manage/"), "guard: the stale markReviewed", own);
             String after = manageText(r);
             for (String name : STALE) {
                 assertFalse(after.contains(name), "the review must remove " + name + " from the list: " + UsabilityFixtures.excerpt(after));
@@ -139,24 +148,52 @@ public class MonitorRefererRedirectTest {
 
     // ---------------------------------------------------------------- helpers
 
-    private static void assertStaysInside(WebResponse answer, String what, String referer, String root) throws Exception {
+    /** The four foreign Referers; the last has a foreign host and a path under the Jenkins context path. */
+    private static List<String> foreign(JenkinsRule r) throws Exception {
+        List<String> out = new ArrayList<>(Arrays.asList(FOREIGN));
+        String underContext = "http://evil.example" + r.getURL().getPath() + "manage/";
+        assertTrue(underContext.contains(r.contextPath + "/manage/"), "premise: the foreign Referer's path lies under the context path");
+        out.add(underContext);
+        return out;
+    }
+
+    private static void assertStaysInside(WebResponse answer, String what, String referer, URL own) throws Exception {
         int code = answer.getStatusCode();
         assertTrue(code >= 300 && code < 400, what + " with Referer '" + referer + "' must redirect, got " + code);
         String to = answer.getResponseHeaderValue("Location");
         assertNotNull(to, what + ": the redirect must carry a Location");
         assertFalse(to.contains("evil.example") || to.contains("x/ y") || to.contains("x/%20y") || to.startsWith("http://x/")
                 || to.startsWith("//"), what + " must not follow the Referer '" + referer + "': " + to);
-        assertTrue(location(to).startsWith(root), what + " with Referer '" + referer + "' must stay inside Jenkins: " + to);
+        URL target = resolve(answer, to);
+        assertOwnOrigin(target, own, what + " with Referer '" + referer + "' (Location " + to + ")");
+        assertTrue(target.getPath().startsWith(own.getPath()), what + " with Referer '" + referer + "' must stay inside Jenkins: " + to);
     }
 
-    private static String location(WebResponse answer) throws Exception {
+    /** The guard: the redirect goes to exactly {@code <Jenkins URL>manage/}, origin included. */
+    private static void assertFollowsOwnPage(WebResponse answer, String what, URL own) throws Exception {
+        int code = answer.getStatusCode();
+        assertTrue(code >= 300 && code < 400, what + " must redirect, got " + code);
         String to = answer.getResponseHeaderValue("Location");
-        assertNotNull(to, "the redirect must carry a Location, got HTTP " + answer.getStatusCode());
-        return location(to);
+        assertNotNull(to, what + ": the redirect must carry a Location");
+        URL target = resolve(answer, to);
+        assertOwnOrigin(target, own, what + " (Location " + to + ")");
+        assertEquals(own.getPath() + "manage/", target.getPath(), what + " follows a same-origin Referer exactly: " + to);
     }
 
-    private static String location(String header) throws Exception {
-        return header.startsWith("/") && !header.startsWith("//") ? header : new URL(header).getPath();
+    /** The Location as a browser resolves it: a bare or relative path against the request URL. */
+    private static URL resolve(WebResponse answer, String location) throws Exception {
+        return new URL(answer.getWebRequest().getUrl(), location);
+    }
+
+    private static void assertOwnOrigin(URL target, URL own, String what) {
+        assertEquals(own.getProtocol(), target.getProtocol(), what + ": the redirect must keep Jenkins' scheme");
+        assertTrue(own.getHost().equalsIgnoreCase(target.getHost()), what + ": the redirect must go to Jenkins' own host "
+                + own.getHost() + ", got " + target.getHost());
+        assertEquals(port(own), port(target), what + ": the redirect must go to Jenkins' own port");
+    }
+
+    private static int port(URL url) {
+        return url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
     }
 
     private static WebResponse post(JenkinsRule r, String action, String query, String referer) throws Exception {

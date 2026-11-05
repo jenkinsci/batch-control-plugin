@@ -69,7 +69,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @WithJenkins
 public class DecidedRequestGuardTest {
 
-    private static final java.util.regex.Pattern ACTION = java.util.regex.Pattern.compile("(?i)approv|reject|cancel|decid");
+    /** The attempted action, per attempt: the verb's stem, any form ("approve", "approved", ...; letter case not pinned). */
+    private static final java.util.Map<String, java.util.regex.Pattern> ACTION = java.util.Map.of(
+            "approve", java.util.regex.Pattern.compile("(?i)\\bapprov\\w*"),
+            "reject", java.util.regex.Pattern.compile("(?i)\\breject\\w*"),
+            "cancel", java.util.regex.Pattern.compile("(?i)\\bcancel\\w*"));
 
     private JenkinsRule j;
     private FreeStyleProject job;
@@ -157,7 +161,9 @@ public class DecidedRequestGuardTest {
      * APPROVED activation request. Each answer is HTTP 4xx, carries no "Oops!" page, stack trace or bare
      * "Access Denied", does not say "Correct the fields marked below" (no field is wrong), and its message
      * names the request's current status (read from the service; letter case not pinned) in the
-     * same sentence as the refused action. The status is
+     * same sentence as the attempted action ("approv...", "reject..." or "cancel..." for the attempt made),
+     * which is looked for after one mention of the status is taken out, so a status word that reads like the
+     * action (APPROVED, REJECTED, CANCELLED) does not count as it. The status is
      * unchanged and {@code batch-x} still has its one build. The link back to the request is not pinned:
      * SPEC fixes no wording or link for this refusal. Guard: the first approve, reject and cancel of
      * PENDING requests succeed.
@@ -241,13 +247,17 @@ public class DecidedRequestGuardTest {
             assertFalse(text.contains("Correct the fields marked below"), where + ": no field is wrong, so the answer must not"
                     + " say 'Correct the fields marked below': " + excerpt(text));
             String message = message(answer);
-            String state = before.name().toLowerCase(Locale.ROOT);
+            java.util.regex.Pattern state = java.util.regex.Pattern.compile("(?i)\\b" + before.name() + "\\b");
+            java.util.regex.Pattern action = ACTION.get(attempt[1]);
             // one sentence (or line) names both the status and the refused action, so a status cell of a
-            // re-rendered request page ("Status EXECUTED") cannot stand in for the message
+            // re-rendered request page ("Status EXECUTED") cannot stand in for the message. The action is
+            // looked for after one mention of the status is taken out, so a status word that itself reads
+            // like the action (APPROVED for approve, REJECTED for reject, CANCELLED for cancel) cannot count
+            // as the action.
             boolean named = Arrays.stream(message.split("[.!?\\n]"))
-                    .anyMatch(s -> s.toLowerCase(Locale.ROOT).contains(state) && ACTION.matcher(s).find());
+                    .anyMatch(s -> state.matcher(s).find() && action.matcher(state.matcher(s).replaceFirst(" ")).find());
             assertTrue(named, where + ": the refusal message must name the current status " + before
-                    + " together with the refused action: " + excerpt(message));
+                    + " and, apart from it, the refused action " + attempt[1] + ": " + excerpt(message));
             assertEquals(before, status.get(), where + " must leave the status unchanged");
         }
     }

@@ -50,8 +50,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * needs only Job/Build.
  *
  * <p>The builds #1 and #2 run while the job is uncontrolled, so they carry no approval marker and the
- * refusal is a TRIGGER_BLOCKED, not a MARKER_REUSE_BLOCKED (SPEC 6 line 115). The HTTP status of the
- * refusal is not pinned (as in T-06-68): SPEC fixes the explanation, not the code.
+ * refusal is a TRIGGER_BLOCKED, not a MARKER_REUSE_BLOCKED (SPEC 6 line 115). The answer's shape follows
+ * the matrix rows on refused build submissions (T-UI-16, T-UI-23: a 4xx HTML page naming approval; T-E2E-49
+ * and note 140: the gate's "Approval required" page): the job page of an approval-required job also names
+ * approval and links the request form (T-06-56), so those two alone would not tell a refusal from an
+ * accepted Rebuild that redirects there.
  *
  * <p>Written from docs/SPEC.md item 6 and section 6, docs/DECISIONS.md D-49, D-51 and D-51a and
  * docs/TEST-MATRIX.md (T-06-68, T-06-80, T-06-81); the retired drivers were read only to learn what each
@@ -61,6 +64,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class PipelineRebuildRefusalTest {
 
     private static final Pattern APPROVAL = Pattern.compile("(?i)approv");
+    /** The job page {@code job/<name>/} or a build page {@code job/<name>/<n>/}, relative to the context path. */
+    private static final Pattern JOB_OR_BUILD_PAGE = Pattern.compile("job/[^/]+/(\\d+/)?");
 
     private JenkinsRule j;
 
@@ -82,13 +87,16 @@ public class PipelineRebuildRefusalTest {
      * T-06-113 (SPEC 6 lines 114, 115, 117; D-49; D-51/D-51a; #31 gap X-37): the activated Pipeline
      * {@code p} built #1 and #2 while uncontrolled and was then made approval-required; u1 holds Job/Build
      * and BatchControl/Request on it but not Run/Replay (premise). u1 POSTs {@code job/p/1/replay/rebuild}
-     * twice within seconds and {@code job/p/2/replay/rebuild} once (crumb). Each answer is an HTML page in
+     * twice within seconds and {@code job/p/2/replay/rebuild} once (crumb). Each answer is the refusal
+     * itself, the way T-UI-16/T-UI-23 and T-E2E-49 describe a refused build submission: HTTP 4xx at the POSTed
+     * URL (no redirect, so not the job page or a build page), an HTML page headed "Approval required" in
      * plain words (no "Oops!", stack trace or bare "Access Denied") naming approval and linking
      * {@code job/p/batch-control}; the queue stays empty, the next build number stays 3 and there are still
      * two builds. Exactly two TRIGGER_BLOCKED records of {@code p} name u1: one names build #1 only (the two
      * attempts within a minute are merged) and one build #2 only. Guard: the same POST by u1 on the
      * uncontrolled Pipeline {@code free-p} builds its #2, so u1's Job/Build is enough for a Rebuild and the
-     * refusal is Batch Control's.
+     * refusal is Batch Control's; its answer lands, through a redirect, on the job or build page and has no
+     * "Approval required" heading, so the refusal-shape checks tell a refusal from an accepted Rebuild.
      */
     @Test
     public void t_06_113_pipelineRebuildByABuildHolderIsRefusedAndRecordedPerAttempt() throws Exception {
@@ -104,6 +112,13 @@ public class PipelineRebuildRefusalTest {
         Page freeAnswer = PluginInteractionFixtures.post(j, "u1", free.getUrl() + "1/replay/rebuild");
         assertTrue(freeAnswer.getWebResponse().getStatusCode() < 400, "guard: u1's Rebuild of the uncontrolled free-p is"
                 + " accepted, got HTTP " + freeAnswer.getWebResponse().getStatusCode());
+        // guard of the refusal-shape checks below: an accepted Rebuild lands, through a redirect, on the job or
+        // build page, which carries no "Approval required" heading
+        String freeLanded = freeAnswer.getUrl().getPath();
+        assertTrue(JOB_OR_BUILD_PAGE.matcher(freeLanded.substring(j.contextPath.length() + 1)).matches(),
+                "guard (premise): an accepted Rebuild lands on the job or build page, landed on " + freeLanded);
+        assertFalse(freeAnswer instanceof HtmlPage && hasApprovalHeading((HtmlPage) freeAnswer),
+                "guard: the page an accepted Rebuild lands on has no 'Approval required' heading");
         j.waitUntilNoActivity();
         assertNotNull(free.getBuildByNumber(2), "guard: u1's Rebuild of the uncontrolled free-p runs as #2");
 
@@ -112,9 +127,19 @@ public class PipelineRebuildRefusalTest {
             String what = "u1's Rebuild of p #" + n;
             Page answer = PluginInteractionFixtures.post(j, "u1", p.getUrl() + n + "/replay/rebuild");
             String text = UsabilityFixtures.text(answer);
+            int code = answer.getWebResponse().getStatusCode();
+            assertTrue(code >= 400 && code < 500, what + ": the refusal must answer HTTP 4xx (T-UI-16, T-UI-23), got " + code
+                    + ": " + excerpt(text));
+            String posted = j.contextPath + "/" + p.getUrl() + n + "/replay/rebuild";
+            String landed = answer.getUrl().getPath();
+            assertEquals(posted, landed, what + ": the answer must be the refusal itself, not a page reached through a redirect");
+            assertFalse(JOB_OR_BUILD_PAGE.matcher(landed.substring(j.contextPath.length() + 1)).matches(),
+                    what + ": the answer must not be the job or a build page: " + landed);
             UsabilityFixtures.assertPlainRefusal(what, text, APPROVAL);
             assertTrue(answer instanceof HtmlPage, what + ": the refusal must be a page the user reads, got "
                     + answer.getWebResponse().getContentType() + ": " + excerpt(text));
+            assertTrue(hasApprovalHeading((HtmlPage) answer), what + ": the refusal must be the gate's 'Approval required' page"
+                    + " (T-E2E-49, note 140): " + excerpt(text));
             assertTrue(UsabilityFixtures.hasLinkTo(j, (HtmlPage) answer, p.getUrl() + "batch-control"), what
                     + ": the refusal must link the request form; anchors were " + UsabilityFixtures.resolvedHrefs((HtmlPage) answer));
         }
@@ -136,6 +161,11 @@ public class PipelineRebuildRefusalTest {
         BatchControlFixtures.activateAsAdmin(pipeline); // D-46: a cause-less submission needs an activation
         j.buildAndAssertSuccess(pipeline);
         return pipeline;
+    }
+
+    /** The page's heading (an {@code h1}) reads "Approval required" (letter case not pinned). */
+    private static boolean hasApprovalHeading(HtmlPage page) {
+        return page.querySelectorAll("h1").stream().anyMatch(h -> "approval required".equalsIgnoreCase(h.asNormalizedText().trim()));
     }
 
     private static boolean namesOnly(ChangeRecord r, int n) {
