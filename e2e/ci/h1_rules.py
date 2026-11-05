@@ -1322,6 +1322,59 @@ def judge_tab_bar_narrow(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py F (#31, r9/s89.py #4, r10/s89.py)
+# The users whose grants page must show all three lists (the seed gives requester, and so admin, pending requests,
+# active windows and ended ones); round3.py F measures every user it visits.
+GRANTS_WRAP_USERS = ("admin", "requester")
+GRANTS_LISTS = ("pending", "active", "ended")
+# Short columns stay on one line (GrantsSection/index.jelly: the id, the user or requester, the duration, the Names
+# restriction, the remaining time and the column of the Revoke and Request again buttons, whose header is empty).
+GRANTS_SHORT_COLUMNS = ("ID", "User", "Requester", "Duration", "Names", "Remaining", "")
+GRANTS_FREE_TEXT = ("Reason",)  # the requester's own words, which may break anywhere
+
+
+def judge_grants_nowrap(rows, ctx=None):
+    """#31 (the retired r9/s89.py #4 and r10/s89.py; e2e-09 DEF-01 "approver-2 breaks as approver- / 2", header "New job
+    names" on 3 lines; e2e-10 DEF-04 "the How text is a state line and may wrap"): at 1280 px, with pending, active and
+    ended entries listed, the grants page's tables keep headers and short cells on one line. round3.py F reads every
+    table[data-batch-control-list] on /batch-control/grants/ for each user it visits:
+      * grants-nowrap-header: every header cell's text takes one line;
+      * grants-nowrap-short: every cell of a GRANTS_SHORT_COLUMNS column takes one line;
+      * grants-nowrap-word: no other cell, the free-text Reason excepted, splits a word (a run of non-blank characters:
+        an item name, an approver name, an action, a date or time part, a word of How) across two lines; those cells
+        may wrap only between words (Scope between kind and name, Approvers and Actions between entries, a date between
+        date and time, How anywhere between words);
+      * grants-nowrap-measured: a row for each GRANTS_WRAP_USERS user whose page answered 200 in a viewport 1280 px
+        wide and showed each of GRANTS_LISTS with at least one entry, every cell read."""
+    j = Judge("grants-nowrap", ctx)
+    by_user = {r.get("user"): r for r in rows}
+    for user in GRANTS_WRAP_USERS:
+        r = by_user.get(user)
+        if r is None:
+            j.fail("grants-nowrap-measured", {"user": user, "row": "missing"})
+            continue
+        lists = {t.get("list"): t for t in r.get("tables") or []}
+        thin = [x for x in GRANTS_LISTS if not (lists.get(x) or {}).get("rows")]
+        unread = [x for x, t in lists.items() if (t.get("read") or 0) < (t.get("rows") or 0)]
+        if r.get("status") != 200 or r.get("viewport") != 1280 or thin or unread:
+            j.fail("grants-nowrap-measured", {"user": user, "status": r.get("status"), "viewport": r.get("viewport"),
+                                              "lists without entries": thin, "unread": unread}, {"error": r.get("error")})
+    for r in rows:
+        user = r.get("user")
+        for t in r.get("tables") or []:
+            key = {"user": user, "list": t.get("list")}
+            for h in t.get("heads") or []:
+                if (h.get("lines") or 0) > 1:
+                    j.fail("grants-nowrap-header", dict(key, header=h.get("text"), lines=h.get("lines")))
+            for c in t.get("cells") or []:
+                col = c.get("col")
+                if col in GRANTS_SHORT_COLUMNS and (c.get("lines") or 0) > 1:
+                    j.fail("grants-nowrap-short", dict(key, column=col, lines=c.get("lines")), {"text": c.get("text")})
+                elif col not in GRANTS_FREE_TEXT and c.get("broken"):
+                    j.fail("grants-nowrap-word", dict(key, column=col, words=c.get("broken")), {"text": c.get("text")})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1342,6 +1395,8 @@ def judge(driver, rows, ctx=None):
         return judge_badges(rows, ctx)
     if driver == "tab-bar-narrow":
         return judge_tab_bar_narrow(rows, ctx)
+    if driver == "grants-nowrap":
+        return judge_grants_nowrap(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

@@ -15,6 +15,8 @@ D model-link (R4-11): dashboard, request detail, activation list/detail; chevron
 E dashboard 50 + History links (R4-13)
 F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; footers; no horizontal scroll at 1280
   M5 (#101, #103): every listed id carries the full id as tooltip and text, no title, cut by CSS; a hover shows it
+  #31 (r9/s89.py #4, r10/s89.py): on the grants page no header or short cell wraps and no word of another cell is split
+  at 1280 px, with pending, active and ended lists shown (ci/h1_rules.py "grants-nowrap")
 G revoke on the window's detail page (R4-12): holder sees no Revoke, manager revokes, holder loses access
 H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
@@ -553,8 +555,40 @@ def tooltip_on_hover(s, el_id):
     return texts, title
 
 
+# #31 (the retired r9/s89.py #4 and r10/s89.py; e2e-09 DEF-01, e2e-10 DEF-04): how many lines each header and cell of
+# the grants page's tables takes at 1280 px, and which words (runs of non-blank characters) are split across lines.
+# Lines are counted from the text's own boxes (Range client rects of the text nodes), grouped into bands that do not
+# overlap vertically, so the boxes of inline-block ids and buttons do not count as lines. Only the cells that take more
+# than one line or split a word are listed. Judged by ci/h1_rules.py ("grants-nowrap").
+WRAP_JS = """() => {
+  const bands = rects => { rects.sort((a, b) => a.top - b.top); let n = 0, bottom = -1e9;
+    rects.forEach(r => { if (r.top >= bottom - 1) { n++; bottom = r.bottom; } else { bottom = Math.max(bottom, r.bottom); } }); return n; };
+  const rectsOf = range => [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+  const texts = el => { const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT,
+    {acceptNode: t => t.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP});
+    const out = []; while (w.nextNode()) out.push(w.currentNode); return out; };
+  const lines = el => bands(texts(el).flatMap(t => { const r = document.createRange(); r.selectNodeContents(t); return rectsOf(r); }));
+  const broken = el => texts(el).flatMap(t => [...t.textContent.matchAll(/\\S+/g)].filter(m => {
+    const r = document.createRange(); r.setStart(t, m.index); r.setEnd(t, m.index + m[0].length); return bands(rectsOf(r)) > 1; })
+    .map(m => m[0]));
+  const flat = e => e.textContent.replace(/\\s+/g, ' ').trim();
+  return {viewport: window.innerWidth, clientW: document.documentElement.clientWidth, tables: [...document.querySelectorAll('#main-panel table[data-batch-control-list]')].map(t => {
+    const heads = [...t.querySelectorAll('thead th')].map(flat);
+    const cells = []; let read = 0;
+    [...t.querySelectorAll('tbody tr')].forEach((tr, ri) => [...tr.children].forEach((td, ci) => {
+      read++; const n = lines(td), b = broken(td);
+      if (n > 1 || b.length) cells.push({row: ri, col: heads[ci] === undefined ? null : heads[ci], text: flat(td).slice(0, 60), lines: n, broken: b});
+    }));
+    return {list: t.getAttribute('data-batch-control-list'), rows: t.querySelectorAll('tbody tr').length,
+            width: Math.round(t.getBoundingClientRect().width),
+            heads: [...t.querySelectorAll('thead th')].map(th => ({text: flat(th), lines: lines(th)})), cells, read};
+  })};
+}"""
+
+
 def sec_F():
     hovered = set()
+    wrap_rows = []
     for user in ("admin", "approver-1", "requester", "fonly"):
         s = Session(user)
         for sec in ("requests", "activations", "grants"):
@@ -576,6 +610,14 @@ def sec_F():
             check("F", f"{user} {sec}: H2 Pending -> Active -> Ended, no form above, ID links to UUID detail, no h-scroll at 1280",
                   len(order_ok) >= 3 and order_ok[0] == "Pending Requests" and order_ok[-1] == "Ended" and lay["formsBefore"] == 0
                   and ids_ok and lists_ok and no_hscroll(lay), lists=lists, **lay)
+            if sec == "grants":
+                wrap = {"user": user, "status": r.status}
+                try:
+                    wrap.update(s.page.evaluate(WRAP_JS))
+                except Exception as e:  # noqa: recorded; a row without tables fails grants-nowrap-measured
+                    wrap["error"] = str(e)[:200]
+                wrap_rows.append(wrap)
+                lib.log("round3", dict(wrap, sec="F", what="grants tables: lines per header and cell at 1280"))
             ids = s.page.evaluate(SHORT_IDS)
             bad = short_ids_bad(ids, r.text())
             listed = sum(t["rows"] for t in lay["tables"])
@@ -592,6 +634,7 @@ def sec_F():
                       title_while_shown=title)
         console_ok("F", s, f"{user} lists", expected=(("403 GET " + BASE + "/batch-control/requests/"),) if user == "fonly" else ())
         s.done()
+    lib.h1.report("grants-nowrap", wrap_rows)
 
 
 # ---------------------------------------------------------------- G

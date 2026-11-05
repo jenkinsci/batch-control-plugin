@@ -114,8 +114,11 @@ reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carrie
 judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), `r14/round3.py` C (`tab-bar-narrow`: on
 `/batch-control/` as admin and approver-1 at 1024 and 800 px the tab bar may wrap, but the page does not scroll
 sideways, every tab is shown inside the viewport and the bar has no hidden overflow of its own:
-`tab-bar-narrow-scroll`, `tab-bar-narrow-reach`, `tab-bar-narrow-measured`), next to #129's `helpcheck.py` layout and
-`s_monitor.py` DEF-04 rules.
+`tab-bar-narrow-scroll`, `tab-bar-narrow-reach`, `tab-bar-narrow-measured`), `r14/round3.py` F (`grants-nowrap`: on
+`/batch-control/grants/` at 1280 px, with pending, active and ended entries listed for admin and requester, every
+header and every cell of a short column (ID, User, Requester, Duration, Names, Remaining, the button column) takes one
+line and no other cell but Reason splits a word across lines: `grants-nowrap-header`, `grants-nowrap-short`,
+`grants-nowrap-word`, `grants-nowrap-measured`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no

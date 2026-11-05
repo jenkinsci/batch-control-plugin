@@ -489,6 +489,43 @@ def _narrow_rows(drop=None, **changes):
             for w in h1.TAB_BAR_NARROW_WIDTHS if (u, w) != drop]
 
 
+# #31 (r9/s89.py #4, r10/s89.py): round3.py F rows of the grants page at 1280 px as main renders them (2026-11-06): the
+# headers on one line; only cells that wrap between words are listed (Scope between kind and name, two approvers, two
+# actions, a date between date and time, a How of four words).
+GRANT_HEADS = {"pending": ["ID", "Scope", "Actions", "Duration", "Reason", "Requester", "Approvers", "Created"],
+               "active": ["ID", "User", "Scope", "Actions", "Names", "Granted", "Expires", "Remaining", ""],
+               "ended": ["ID", "User", "Scope", "Actions", "Names", "Ended", "How", ""]}
+
+
+def _wrap_cell(col, text, lines=2, broken=(), row=0):
+    return {"row": row, "col": col, "text": text, "lines": lines, "broken": list(broken)}
+
+
+def _wrap_table(lst, cells=None, rows=3, heads=None):
+    heads = heads or [{"text": h, "lines": 1 if h else 0} for h in GRANT_HEADS[lst]]
+    if cells is None:
+        cells = {"pending": [_wrap_cell("Scope", "Pipeline batch-pipeline"), _wrap_cell("Approvers", "approver-1, approver-2"),
+                             _wrap_cell("Created", "2026-11-06 00:46:19 KST"), _wrap_cell("Reason", "e2e-14 new grant dialog")],
+                 "active": [_wrap_cell("Actions", "CREATE, CONFIGURE"), _wrap_cell("Expires", "2026-11-06 01:47:51 KST")],
+                 "ended": [_wrap_cell("How", "Revoked (its item was deleted) by fonly"),
+                           _wrap_cell("Scope", "Freestyle project ops/del-me")]}[lst]
+    return {"list": lst, "rows": rows, "width": 1036, "heads": heads, "cells": cells, "read": rows * len(GRANT_HEADS[lst])}
+
+
+def _wrap_row(user, **tables):
+    """A grants page row; `tables` replaces a list's table (None drops it)."""
+    out = []
+    for lst in ("pending", "active", "ended"):
+        t = tables.get(lst, _wrap_table(lst))
+        if t is not None:
+            out.append(t)
+    return {"user": user, "status": 200, "viewport": 1280, "clientW": 1280, "tables": out}
+
+
+def _wrap_rows(**by_user):
+    return [by_user.get(u.replace("-", "_"), _wrap_row(u)) for u in ("admin", "approver-1", "requester", "fonly")]
+
+
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
     ("the Resolve form offered before the acknowledgement", {"forms_before": ["acknowledge", "resolve", "addComment", "rerun"]}),
     ("no Acknowledge form on an open incident", {"forms_before": ["addComment", "rerun"]}),
@@ -867,6 +904,44 @@ def synthetic():
          _narrow_rows(admin_800={"tabs": _narrow("admin", 800)["tabs"][:6]}), {}, "fail", "tab-bar-narrow-measured"),
         ("tab-bar-narrow: #31 no row at all (section C did not reach the check)", "tab-bar-narrow", [], {}, "fail",
          "tab-bar-narrow-measured"),
+        # #31 (r9/s89.py #4, r10/s89.py): the grants page's headers and short cells at 1280 px (round3.py F)
+        ("grants-nowrap: #31 cells wrap only between words, headers and short cells on one line", "grants-nowrap",
+         _wrap_rows(), {}, "pass", None),
+        ("grants-nowrap: #31 the free-text Reason splits a long word (allowed)", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Reason", "see https://x/a-very-long-url",
+                                                                                      broken=["https://x/a-very-long-url"])]))),
+         {}, "pass", None),
+        ("grants-nowrap: #31 DEF-01: approver-2 breaks as approver- / 2", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Approvers", "approver-2",
+                                                                                      broken=["approver-2"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 DEF-01: a header on two lines", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", active=_wrap_table("active", heads=[
+             {"text": h, "lines": 2 if h == "Remaining" else 1} for h in GRANT_HEADS["active"]]))),
+         {}, "fail", "grants-nowrap-header"),
+        ("grants-nowrap: #31 a duration '30 min' on two lines (a short cell wrapping between words)", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Duration", "30 min")]))),
+         {}, "fail", "grants-nowrap-short"),
+        ("grants-nowrap: #31 Request again on two lines in the button column", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", ended=_wrap_table("ended", [_wrap_cell("", "Request again")]))),
+         {}, "fail", "grants-nowrap-short"),
+        ("grants-nowrap: #31 an item name split inside the Scope cell", "grants-nowrap",
+         _wrap_rows(fonly=_wrap_row("fonly", ended=_wrap_table("ended", [_wrap_cell("Scope", "Freestyle project ops/del-me",
+                                                                                  lines=3, broken=["ops/del-me"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 a date split inside its date part", "grants-nowrap",
+         _wrap_rows(approver_1=_wrap_row("approver-1", active=_wrap_table("active", [_wrap_cell("Granted", "2026-11-06 00:47:51 KST",
+                                                                                            lines=3, broken=["2026-11-06"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 requester's page without ended entries (premise of 'both tables populated')", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", ended=None)), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 admin's active list empty", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", active=_wrap_table("active", [], rows=0))), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 measured at another width", "grants-nowrap",
+         _wrap_rows(admin=dict(_wrap_row("admin"), viewport=1024, clientW=1024)), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 the admin row missing", "grants-nowrap", _wrap_rows()[1:], {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 no row at all (section F did not reach the grants page)", "grants-nowrap", [], {}, "fail",
+         "grants-nowrap-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],
