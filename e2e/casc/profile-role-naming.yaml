@@ -1,4 +1,5 @@
-# e2e-10 item 5 (D-59b, role-strategy#751). Applied by hand (r10/d59b.py), not at boot.
+# e2e-10 item 5 (D-59b, role-strategy#751). Applied by hand, not at boot; the driver that applied it, r10/d59b.py, was
+# removed in #31 (MoveNamingStrategyTest T-SEC-73/75 asserts its checks; see e2e/README.md "Removed drivers").
 # namer: Move+Delete on prod/*, Create only of names team-.* in folder team (role-based naming).
 jenkins:
   authorizationStrategy:
