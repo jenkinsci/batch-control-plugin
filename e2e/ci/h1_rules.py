@@ -933,6 +933,15 @@ RS_EDIT = {"role": "e2e31-prod", "old": "prod/.*", "new": "prod(/.*)?", "perms":
 RS_MATCH_CAP = 15  # role-strategy 927's manage-roles bundle: getMatchingJobs?maxJobs=15
 
 
+# #31 (B/b8-role.mjs #1): the Batch Control permissions role-strategy's Add Role dialogs must offer (SPEC 2: "Matrix and
+# Role based strategies expose them"; D-38a: Request is assignable per item), and the item role manage_roles.py saves
+BC_PERM = "io.jenkins.plugins.batchcontrol.security.BatchControlPermissions."
+BC_PERMS = tuple(BC_PERM + p for p in ("Manage", "Request", "Approve", "RequestGrant", "ViewHistory"))
+CORE_ITEM_READ = "hudson.model.Item.Read"
+RS_PERMS_ROLE, RS_PERMS_PATTERN = "e2e31-bcreq", "e2e31-none/.*"
+RS_PERMS_SAVED = (CORE_ITEM_READ, BC_PERM + "Request")
+
+
 def judge_role(name, res, ctx=None):
     """res: the one dict the role script logs. Tables from e2e-13/14 RS (SPEC D-35f/D-35g, D-35a)."""
     # the script passes its dict as built (tuples); the log and the tables hold JSON (lists): compare JSON with JSON
@@ -975,6 +984,8 @@ def judge_role(name, res, ctx=None):
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
     elif name == "manage_edit":
         manage_edit(j, res, bad_req)
+    elif name == "manage_perms":
+        manage_perms(j, res, bad_req)
     elif name == "endpoints":
         rs6 = res.get("RS-6 admin forwarded == role-strategy") or {}
         bad6 = {k: v[:2] for k, v in rs6.items() if v[0] != 200 or v[1] is not True}
@@ -1056,6 +1067,37 @@ def manage_edit(j, res, bad_req):
         j.fail("role-edit-requests", {"bad requests": bad_req(), "bad": res.get("bad"), "template bad": res.get("template bad")})
     j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
     j.console("console", res.get("template console"), {"role": "admin", "page": "/manage/role-strategy/permission-templates"})
+
+
+def manage_perms(j, res, bad_req):
+    """#31 (the retired B/b8-role.mjs #1; SPEC 2: the five permissions are exposed to the Role based strategy, D-38a:
+    Request also per item), manage_roles.py's third part as admin under the Batch Control role strategy:
+      * role-bc-perms: the Add Role dialog of Global roles offers all five Batch Control permissions (BC_PERMS), and the
+        one of Item roles offers BatchControl/Request;
+      * role-bc-save: the item role RS_PERMS_ROLE (pattern RS_PERMS_PATTERN) saved through that dialog with
+        BatchControl/Request and Job/Read ticked closes the dialog, is listed after a reload and holds exactly those
+        two permissions on the server, the strategy still RS_STRATEGY;
+      * role-bc-perms-measured: both dialogs opened and their permissions were read, core's Job/Read offered in each
+        read (the reader works), the role removed again afterwards, nothing raised, no role-strategy request answered
+        >= 400 and no unexplained console error."""
+    glob, item = res.get("global offered"), res.get("item offered")
+    measured = isinstance(glob, list) and isinstance(item, list) and CORE_ITEM_READ in glob and CORE_ITEM_READ in item
+    if (not measured or not res.get("global dialog") or not res.get("item dialog") or res.get("error")
+            or res.get("server role after remove") != "none" or bad_req() or res.get("bad")):
+        j.fail("role-bc-perms-measured", {k: res.get(k) for k in ("global dialog", "item dialog", "error", "remove",
+                                                                  "server role after remove", "bad")}
+               | {"core read offered": [CORE_ITEM_READ in (glob or []), CORE_ITEM_READ in (item or [])], "bad requests": bad_req()})
+    if measured:
+        missing = [p.rsplit(".", 1)[1] for p in BC_PERMS if p not in glob]
+        if missing or BC_PERM + "Request" not in item:
+            j.fail("role-bc-perms", {"global missing": missing, "item offers Request": BC_PERM + "Request" in item},
+                   {"global": [p for p in glob if p.startswith(BC_PERM)], "item": [p for p in item if p.startswith(BC_PERM)]})
+    want = f"{RS_PERMS_PATTERN} [{', '.join(sorted(RS_PERMS_SAVED))}]"
+    if not (res.get("item closed") is True and res.get("listed after reload") == 1 and res.get("server role") == want
+            and res.get("strategy") == RS_STRATEGY):
+        j.fail("role-bc-save", {k: res.get(k) for k in ("ticked", "item closed", "listed after reload", "server role", "strategy")}
+               | {"expected": want})
+    j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
 
 
 # ------------------------------------------------------------------ r15

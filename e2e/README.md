@@ -135,8 +135,12 @@ month's sentence exactly when it lists nothing; a month without records, asked f
 change records in <m>." / "No incidents in <m>." without a footer; Change Records' shown month holds more than 50
 records on the CI stack, so page 1 lists 50 with the footer "Page 1 (<n> records in <m>)" and Older opens page 2 with
 the rest, its own footer, another first row and Newer: `month-nav-prev`, `month-nav-empty`, `month-nav-paging`,
-`month-nav-measured`; Incidents' paging is a JenkinsRule row), next to #129's `helpcheck.py` layout and `s_monitor.py`
-DEF-04 rules.
+`month-nav-measured`; Incidents' paging is a JenkinsRule row), `r14/role/manage_roles.py`'s third part
+(`role/manage_perms`, as admin under the Batch Control role strategy: Global roles' Add Role offers all five Batch
+Control permissions and Item roles' offers BatchControl/Request, core's Job/Read read in both as the reader's proof; the
+item role e2e31-bcreq saved there with Job/Read and BatchControl/Request is listed after a reload and holds exactly
+those two on the server, then is removed: `role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), next to #129's
+`helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -964,4 +968,6 @@ role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were 
 `casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).
 `manage_roles.py` adds e2e13-global and e2e13-team in the browser (kept for the later scripts), then (#31, the checks
 of the retired `r6/s2b.py` and `r6/s2d.py`) edits, pattern-checks and deletes its own item role e2e31-prod and adds and
-deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`).
+deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`), and (#31, the
+check of the retired `legacy/` B/b8-role.mjs #1) reads the permissions both Add Role dialogs offer and adds the item role
+e2e31-bcreq with Job/Read and BatchControl/Request, removed again over REST (screenshot `RS-31-06`).

@@ -674,6 +674,21 @@ def _month_rows(changes=None, incidents=None, drop=None, **kw):
     return list(rows.values())
 
 
+PERM_CORE = ["hudson.model.Hudson.Administer", "hudson.model.Hudson.Read", h1.CORE_ITEM_READ, "hudson.model.Item.Build"]
+
+
+def _perms(**change):
+    """manage_roles.py's third part (judge_role "manage_perms") as a green run logs it."""
+    res = {"global dialog": "Add global role", "global offered": sorted(PERM_CORE + list(h1.BC_PERMS)), "global closed": True,
+           "item dialog": "Add item role", "item offered": sorted([h1.CORE_ITEM_READ, "hudson.model.Item.Build", h1.BC_PERM + "Request"]),
+           "ticked": ["hudson.model.Item.Discover", h1.CORE_ITEM_READ, h1.BC_PERM + "Request"], "item closed": True,
+           "listed after reload": 1, "server role": f"{h1.RS_PERMS_PATTERN} [{h1.CORE_ITEM_READ}, {h1.BC_PERM}Request]",
+           "strategy": h1.RS_STRATEGY, "console": [], "bad": [], "remove": 200, "server role after remove": "none",
+           "requests": ["200 GET /manage/role-strategy/manage-roles", "200 POST /role-strategy/strategy/addRole"], "seconds": 2.8}
+    res.update(change)
+    return res
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -1261,6 +1276,27 @@ def synthetic():
         ("month-nav: #31 the Incidents row missing", "month-nav", _month_rows(drop=IN), None, "fail", "month-nav-measured"),
         ("month-nav: #31 « not followed", "month-nav", _month_rows(changes={"prev": None}), None, "fail", "month-nav-measured"),
         ("month-nav: #31 no row at all", "month-nav", [], None, "fail", "month-nav-measured"),
+        # #31 X-24 (role/manage_roles.py "manage_perms"): the five permissions in Add Role, Request saved on an item role
+        ("role: #31 Add Role offers the five permissions, the item role keeps Request", "role/manage_perms", [_perms()], None, "pass",
+         None),
+        ("role: #31 Global roles' Add Role lacks ViewHistory", "role/manage_perms",
+         [_perms(**{"global offered": sorted(PERM_CORE + [p for p in h1.BC_PERMS if not p.endswith("ViewHistory")])})], None, "fail",
+         "role-bc-perms"),
+        ("role: #31 Item roles' Add Role lacks Request", "role/manage_perms",
+         [_perms(**{"item offered": [h1.CORE_ITEM_READ, "hudson.model.Item.Build"]})], None, "fail", "role-bc-perms"),
+        ("role: #31 the saved item role lost Request", "role/manage_perms",
+         [_perms(**{"server role": f"{h1.RS_PERMS_PATTERN} [{h1.CORE_ITEM_READ}]"})], None, "fail", "role-bc-save"),
+        ("role: #31 the item role not listed after a reload", "role/manage_perms", [_perms(**{"listed after reload": 0})], None, "fail",
+         "role-bc-save"),
+        ("role: #31 the dialog stays open after Add", "role/manage_perms", [_perms(**{"item closed": False})], None, "fail",
+         "role-bc-save"),
+        ("role: #31 the permission reader sees no core permission", "role/manage_perms",
+         [_perms(**{"global offered": [], "item offered": []})], None, "fail", "role-bc-perms-measured"),
+        ("role: #31 the role not removed again", "role/manage_perms", [_perms(**{"server role after remove": "e2e31-none/.* [x]"})],
+         None, "fail", "role-bc-perms-measured"),
+        ("role: #31 addRole answered 500", "role/manage_perms",
+         [_perms(requests=["200 GET /manage/role-strategy/manage-roles", "500 POST /role-strategy/strategy/addRole"])], None, "fail",
+         "role-bc-perms-measured"),
     ]
 
 
