@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import com.cloudbees.hudson.plugins.folder.Folder;
 import hudson.model.Action;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -20,6 +21,7 @@ import jenkins.model.experimentalflags.UserExperimentalFlagsProperty;
 import jenkins.model.menu.event.Event;
 import jenkins.model.menu.event.JavaScriptEvent;
 import org.htmlunit.html.DomElement;
+import org.htmlunit.html.DomNode;
 import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,7 +46,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the {@code blockTimer}/{@code blockUpstream} notice "naming the switch that blocks it and how to
  * clear it") and item 6a ("the job page shows whether the job is activated or on hold and links to
  * the activation request form"). Coverage inventory G-M11 and G-M15 (JenkinsRule part); matrix rows
- * T-UI-119, T-06-105 and T-06a-56 (note 269).
+ * T-UI-119, T-06-105 and T-06a-56 (note 269); T-UI-297 (a nested job's grant dialog) and T-UI-303 (the
+ * notices' card) for issue #31 (note 369).
  *
  * <p>Core's {@code DialogEvent.of(url)} is a {@link JavaScriptEvent} whose attributes are
  * {@code type=dialog-opener} and {@code dialog-url=<url>}; core's dialog fetches that URL from the
@@ -180,7 +183,117 @@ public class NewJobPageEntriesTest {
         assertTrue(after.contains("batch-control-activation"), "the activated job's new page must still link the activation form");
     }
 
+    /**
+     * T-UI-297 (SPEC 8 D-66/D-70, as T-UI-119 for a job two folders deep; #31, retired drivers
+     * r6/s4a.py, r7/a_ui.py, r7/n_newjob.py, r11/s_newmenu.py, the DEF-01 family): on the new job page
+     * of the approval-required {@code ops/nightly/k}, g1's "Request Change Permission" action opens the
+     * dialog at exactly {@code <root>batch-control/grants/dialog?scopeFullName=ops%2Fnightly%2Fk}
+     * (resolved against the job page, so a relative URL that lands below the folders fails). g1's GET
+     * of that URL answers 200 with the grant form's {@code scopeFullName} field holding
+     * {@code ops/nightly/k}.
+     */
+    @Test
+    public void t_ui_297_nestedJobGrantEntryOpensTheDialogForItsFullName() throws Exception {
+        Folder ops = j.jenkins.createProject(Folder.class, "ops");
+        Folder nightly = ops.createProject(Folder.class, "nightly");
+        FreeStyleProject k = nightly.createProject(FreeStyleProject.class, "k");
+        setBatchControl(k, new BatchControlJobProperty(true));
+        assertEquals("ops/nightly/k", k.getFullName(), "fixture: the job is two folders deep");
+        URL jobPage = new URL(j.getURL(), k.getUrl());
+
+        Action grant = only(actions("g1", k, a -> GRANT_ENTRY.equals(a.getDisplayName()) && a.getIconFileName() != null),
+                "g1's " + GRANT_ENTRY + " action on ops/nightly/k");
+        String dialog = dialogUrl("g1", grant, jobPage);
+        assertEquals(j.getURL() + "batch-control/grants/dialog?scopeFullName=ops%2Fnightly%2Fk", dialog,
+                "the " + GRANT_ENTRY + " entry of a nested job must open the grant dialog at the root with the encoded full name");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("g1");
+        wc.getOptions().setJavaScriptEnabled(false);
+        HtmlPage page = wc.getPage(new URL(dialog));
+        assertEquals(200, page.getWebResponse().getStatusCode(), "the dialog URL must answer g1");
+        List<String> scopes = new ArrayList<>();
+        for (DomNode n : page.querySelectorAll("form[name=createGrantRequest] input[name=scopeFullName]")) {
+            scopes.add(((DomElement) n).getAttribute("value"));
+        }
+        assertEquals(List.of("ops/nightly/k"), scopes, "the dialog's grant form must carry the nested job's full name as its scope");
+    }
+
+    /**
+     * T-UI-303 (SPEC 6 notices on the job page; #72, retired drivers r9/s72.py and r9/s72b.py): with
+     * the new job page on, u1's page of the approval-required {@code batch-x} renders exactly one
+     * {@code .jenkins-card} titled "Batch Control", and it holds the manual-run notice, the link to
+     * the request screen ({@code job/batch-x/batch-control/}) and every link of the main panel to it or
+     * to the activation form ({@code batch-control-activation/}; premise: at least one of each). Core's
+     * card titled "Legacy" (premise: rendered by core) holds no "Batch Control" text and none of those
+     * links.
+     */
+    @Test
+    public void t_ui_303_newJobPageNoticesSitInTheBatchControlCard() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("batch-x");
+        setBatchControl(job, new BatchControlJobProperty(true));
+        HtmlPage page = UsabilityFixtures.htmlPage(j, "u1", job.getUrl());
+        DomElement main = page.getElementById("main-panel");
+        assertNotNull(main, "the new job page must have a main panel");
+
+        List<DomElement> bcCards = cardsTitled(main, "Batch Control");
+        assertEquals(1, bcCards.size(), "the new job page must render one card titled 'Batch Control': " + UsabilityFixtures.excerpt(mainText(page)));
+        DomElement card = bcCards.get(0);
+        DomElement notice = findApprovalNotice(page);
+        assertNotNull(notice, "premise: the page shows the manual-run notice");
+        assertTrue(isInside(notice, card), "the manual-run notice must sit in the Batch Control card: " + notice.asNormalizedText());
+
+        String requestScreen = new URL(j.getURL(), job.getUrl() + "batch-control/").getPath();
+        String activation = new URL(j.getURL(), job.getUrl() + "batch-control-activation/").getPath();
+        int toRequest = 0;
+        int toActivation = 0;
+        for (DomNode n : main.querySelectorAll("a[href]")) {
+            DomElement a = (DomElement) n;
+            String path = page.getFullyQualifiedUrl(a.getAttribute("href")).getPath();
+            if (path.equals(requestScreen) || path.equals(activation)) {
+                assertTrue(isInside(a, card), "every link to " + path + " must sit in the Batch Control card: " + a.asXml());
+                toRequest += path.equals(requestScreen) ? 1 : 0;
+                toActivation += path.equals(activation) ? 1 : 0;
+            }
+        }
+        assertTrue(toRequest >= 1, "premise: the card links the request screen");
+        assertTrue(toActivation >= 1, "premise: the card links the activation form");
+
+        List<DomElement> legacy = cardsTitled(main, "Legacy");
+        assertEquals(1, legacy.size(), "premise: core renders its Legacy card on the new job page");
+        String legacyText = legacy.get(0).asNormalizedText();
+        assertFalse(legacyText.toLowerCase(Locale.ROOT).contains("batch control"), "core's Legacy card must hold no Batch Control"
+                + " text (#72): " + UsabilityFixtures.excerpt(legacyText));
+        for (DomNode n : legacy.get(0).querySelectorAll("a[href]")) {
+            assertFalse(((DomElement) n).getAttribute("href").contains("batch-control"),
+                    "core's Legacy card must hold no Batch Control link: " + ((DomElement) n).asXml());
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** The {@code .jenkins-card} elements whose own title ({@code .jenkins-card__title} child) reads {@code title}. */
+    private static List<DomElement> cardsTitled(DomElement main, String title) {
+        List<DomElement> out = new ArrayList<>();
+        for (DomNode n : main.querySelectorAll(".jenkins-card")) {
+            for (DomNode child = n.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (child instanceof DomElement e && (" " + e.getAttribute("class") + " ").contains(" jenkins-card__title ")
+                        && title.equals(e.asNormalizedText().trim())) {
+                    out.add((DomElement) n);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean isInside(DomNode node, DomNode ancestor) {
+        for (DomNode n = node; n != null; n = n.getParentNode()) {
+            if (n == ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 
     private interface ActionFilter {
         boolean test(Action a);

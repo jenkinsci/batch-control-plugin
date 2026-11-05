@@ -25,6 +25,8 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.DomNode;
 import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
@@ -360,6 +362,67 @@ public class ApprovalScreenRecentRunsTest {
         }
     }
 
+    /**
+     * T-UI-294 (#31, retired e2e script rest-screens-v2.sh #2; the request page's counterpart of the dashboard
+     * and History columns of RunTableColumnsTest): on a2's view of a PENDING request, the table that
+     * follows the heading "Recent Runs of This Job" has the header cells exactly Build, Result, Started,
+     * Duration, in that order. Premise: it lists the latest run, #12, so it is the recent-run table and
+     * not an empty placeholder.
+     */
+    @Test
+    public void t_ui_294_recentRunsTableHasTheFourColumns() throws Exception {
+        RunRequest request = createRequest(READING_APPROVER, "recent-run columns");
+        HtmlPage page = detailPage(READING_APPROVER, request.getId());
+        DomElement table = recentRunsTable(page);
+        assertTrue(showsRun(table.asXml(), JOB, BUILDS), "premise: the recent-run table lists run #" + BUILDS);
+        List<String> headers = new ArrayList<>();
+        for (DomNode th : table.querySelectorAll("thead th")) {
+            headers.add(th.asNormalizedText().trim());
+        }
+        assertEquals(Arrays.asList("Build", "Result", "Started", "Duration"), headers,
+                "the recent-run table's columns must be exactly Build, Result, Started, Duration");
+    }
+
+    /**
+     * T-UI-295 (#31, retired e2e script rest-screens-v2.sh #5; low, the wording is the screen's, note 40): the
+     * recent-run size links ({@code ?runs=}) sit in a {@code nav} labelled (aria-labelledby) by an
+     * element reading "Runs to show:", and one {@code .jenkins-description} sentence starting with
+     * "Showing" names the number of runs shown: 5 by default; 10 and no longer 5 after {@code ?runs=10};
+     * the job's 12 and not 20 after {@code ?runs=20} (more than the job has). A constant sentence, or
+     * one that echoes the parameter, fails.
+     */
+    @Test
+    public void t_ui_295_runsControlIsLabelledAndTheCountIsStated() throws Exception {
+        RunRequest request = createRequest(READING_APPROVER, "recent-run wording");
+        HtmlPage page = detailPage(READING_APPROVER, request.getId());
+
+        DomElement nav = null;
+        for (DomNode n : page.querySelectorAll("nav")) {
+            DomElement candidate = (DomElement) n;
+            if (candidate.querySelector("a[href*='runs=']") != null) {
+                assertTrue(nav == null, "one nav holds the recent-run size links");
+                nav = candidate;
+            }
+        }
+        assertNotNull(nav, "the recent-run size links must sit in a nav element");
+        String labelId = nav.getAttribute("aria-labelledby");
+        assertFalse(labelId.isEmpty(), "the size links' nav must be labelled: " + nav.asXml());
+        DomElement label = page.getElementById(labelId);
+        assertNotNull(label, "the nav's aria-labelledby must name an element of the page: " + labelId);
+        assertEquals("Runs to show:", label.asNormalizedText().trim(), "the size control's label");
+
+        String byDefault = showingSentence(page);
+        assertTrue(number(5).matcher(byDefault).find(), "by default the sentence must name the 5 runs shown: " + byDefault);
+        String ten = showingSentence(runsAnchor(page, "10").click());
+        assertTrue(number(10).matcher(ten).find(), "with runs=10 the sentence must name the 10 runs shown: " + ten);
+        assertFalse(number(5).matcher(ten).find(), "with runs=10 the sentence must no longer name 5: " + ten);
+        String twenty = showingSentence(runsAnchor(page, "20").click());
+        assertTrue(number(BUILDS).matcher(twenty).find(), "with runs=20 the job's " + BUILDS + " runs are all shown, and the"
+                + " sentence must name " + BUILDS + ": " + twenty);
+        assertFalse(number(20).matcher(twenty).find(), "with runs=20 only " + BUILDS + " runs exist, so the sentence must not"
+                + " claim 20: " + twenty);
+    }
+
     // ---------------------------------------------------------------- assertions
 
     /** Fetches the screen and asserts the window it renders, for one {@code runs} value. */
@@ -431,6 +494,32 @@ public class ApprovalScreenRecentRunsTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** The table that follows the heading "Recent Runs of This Job". */
+    private static DomElement recentRunsTable(HtmlPage page) {
+        List<DomElement> found = page.getByXPath("//h2[normalize-space(.)='Recent Runs of This Job']/following::table[1]");
+        assertEquals(1, found.size(), "the request page must show a table under 'Recent Runs of This Job'");
+        return found.get(0);
+    }
+
+    /** The one {@code .jenkins-description} of the main panel whose text starts with "Showing". */
+    private static String showingSentence(HtmlPage page) {
+        List<String> found = new ArrayList<>();
+        for (DomNode n : page.getElementById("main-panel").querySelectorAll(".jenkins-description")) {
+            String text = n.asNormalizedText().trim();
+            if (text.startsWith("Showing")) {
+                found.add(text);
+            }
+        }
+        assertEquals(1, found.size(), "the recent-run table must be followed by one 'Showing ...' sentence: " + found);
+        return found.get(0);
+    }
+
+    /** {@code n} as a whole number, not part of a longer one. */
+    private static Pattern number(int n) {
+        return Pattern.compile("(?<![0-9])" + n + "(?![0-9])");
+    }
+
 
     private static List<String> concat(List<String> first, List<String> second) {
         List<String> all = new ArrayList<>(first);
