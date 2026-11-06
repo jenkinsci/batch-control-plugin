@@ -58,7 +58,8 @@ IdenticalPendingRequestTest
 [run approval and mail]
 Approv*Test
 DiscoverOnlyRequestScreenTest ExpiryAndCancelTest MissedInvalidationGapTest
-DecidedRequestApproverChangeTest
+QueuedApprovedRunExpiryTest
+DecidedRequest*Test
 MultiApproverTest PendingCountTest QueueBlockTest RunControlUsabilityTest
 DeprecatedUserCauseTest
 DecisionAreaTest
@@ -81,6 +82,7 @@ MarkerReuseAuditTest RebuildContextMenuTest RunMarkerGapTest RunRerunBudgetGapTe
 Rerun*Test
 # refused and blocked builds
 HoldRefusalRecordTest
+PipelineRebuildRefusalTest
 Refused*Test
 Trigger*Test
 
@@ -101,8 +103,8 @@ OrganizationFolderCreationGapTest
 Authorization*Test
 FailClosedGapTest PlainMatrixMoveGuardTest ResponsePassThroughTest SecurityRegressionTest
 Guard*Test
-MarkedRerunFollowUpTest
-MarkedRunRestartFollowUpTest
+# marked runs (D-58b/D-58c): follow-ups and the job page
+Marked*Test
 PermissionBoundaryGapTest
 # what a viewer is shown: actions, links, job URLs, section tabs
 ActionVisibilityTest JobUrlRoutingRealJenkinsTest ModelLinkTest RunLinkRuleTest
@@ -113,8 +115,10 @@ Link*Test
 SectionTabs*Test
 
 [permissions and plugins]
-BuildAuthenticatorMonitorTest MatrixStrategyTest MonitorStandingPermissionGapTest
-PermissionNameTest PermissionsTest SystemBuildWarningTest
+BuildAuthenticatorMonitorTest MatrixStrategyTest
+PermissionDescriptionTest PermissionNameTest PermissionsTest SystemBuildWarningTest
+# the administrative monitors: standing permissions, dismissal, redirects
+Monitor*Test
 Role*Test
 Strategy*Test
 # other plugins, present or absent
@@ -127,6 +131,7 @@ ChangeRecord*Test
 DiffAllocationTest
 ChangeControlWithoutMatrixAuthGapTest ChangesMonthDefaultTest ConfigAuditTest
 DatesClockZoneTest DiffSummaryAndDatesTest RecordHistoryGapTest RunRecordListenerTest
+FolderRenameRecordTest RecordingSwitchesOffTest
 Csv*Test
 History*Test
 Snapshot*Test
@@ -154,8 +159,11 @@ ValuesFile*Test
 FilterDropdownTest ResultLabelPageTest RunTableColumnsTest StatusLabelPageTest StatusLabelsTest
 # pages, forms and the global configuration
 ConfigPagePolishTest ConfigUsabilityTest ConfigurationValidationGapTest DashboardLimitTest
-FilterFormCrumbTest FormRefusalUsabilityTest PolishMarkupTest SwitchSaveFailureTest
+FilterFormCrumbTest FormRefusalUsabilityTest PolishMarkupTest
+SwitchSaveFailure*Test
 XssEscapingTest
+# no Back link on detail pages and forms, entry icons, no design references in operator text
+DetailPageBackLinkTest EntryIconTest OperatorTextReferenceTest
 Global*Test
 PageTitleIdRowTest
 RevertPlacementTest
