@@ -325,6 +325,18 @@ newer sections in English.
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
 
+    It also sees only the permissions granted on the whole controller: global
+    matrix entries and global roles. A change permission (`Item/Configure`,
+    `Item/Create`, `Item/Delete` or `Item/Move`) given per item is not seen,
+    whether it comes from a job's or a folder's authorization property
+    (matrix-auth) or from an item role (role-strategy), whatever the role's
+    pattern, `.*` included. A non-administrator who holds one that way can
+    make those changes without a permission window, yet the monitor does not
+    name them, while the same permission from a global role or a global matrix
+    entry is named. A silent monitor therefore does not mean that nobody holds
+    a standing change permission: review the job and folder authorization
+    properties and the item roles themselves (security-05 S-07, issue #31).
+
 <!-- Item 46 was added after 13-45 and sits here by topic. The comment ends the list so that it renders as 46, not 13. -->
 
 46. **A `config.xml` that still names the removed generic wrapper stops
