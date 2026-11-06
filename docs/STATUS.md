@@ -13,6 +13,34 @@
 
 ---
 
+## 2026-11-06 — #31 stage three: legacy e2e drivers replaced by CI checks and JenkinsRule rows
+- The entries between 2026-10-18 and this one were not written here. The pull requests merged in that period are its record.
+- **Merged for #31, 2026-11-05 to 11-06.** Each guard went red with its defect put back in `src/main` before it was merged. The CI e2e guards ran green three times on the fork.
+  - `e2e/scripts` and `e2e/r6`..`e2e/r11`:
+    - #133: removed the drivers whose checks CI already asserted.
+    - #134: JenkinsRule guards, note 369.
+    - #140: CI e2e guards (`role/manage_edit`, `destructive` configuration page, `dark`, `grants-nowrap`, `tab-bar-narrow`).
+    - #142: removed the last 28 drivers and 11 orphaned helpers. `r9/`..`r11/` are gone.
+  - `e2e/legacy/`:
+    - #137: removed 128 of 203 files.
+    - #138 and #139: JenkinsRule guards, notes 370 and 371.
+    - #141: CI e2e guards (`month-nav`, `role/manage_perms`, `detail-narrow`, `deploy` as the new unit `h3-deploy`, `request-dialog-cancel`).
+    - #143: removed the rest. Only `legacy/extra/theme.mjs` (contrast, X-54) stays, until #123 is decided.
+  - #135 (merged through #140, label bug): the grants pages' Approvers cell no longer splits an approver id at its hyphen. The new `grants-nowrap-word` rule found it. It is user-facing, so it is in the next release.
+  - #136: LIMITATIONS item 12 says that the standing-permission monitor reads only controller-wide permissions (security-05 S-07, gap X-39).
+  - #132 filed: the jelly `checkAnyPermission` finding.
+- **Decided, without a row or a fix:**
+  - X-20 and X-35: no meaningful assertion exists (notes 370 (2) and 371 (2)).
+  - X-40 and X-55: obsolete by the owner's ruling.
+  - X-54: the light-theme contrast of `.batch-control-run__result` (3.91:1, core's `--text-color-secondary`) is parked with #123. The guard is written but not merged.
+- **Open for the human:**
+  - **SPEC 8:** whether to say that the monitor does not see per-item grants (`SPEC.md:161`).
+  - **Note 369 (13):** core Overall/Manage on the reviewed page needs a SPEC sentence.
+  - **Note 370:** whether the save-failure answer should hide the file path and the I/O error (U-25), and the pending lists' oldest-first order, which SPEC leaves open.
+  - **D-88:** quoted by T-05-204/205/212 but not in DECISIONS yet.
+  - **`.claude/agents/e2e-tester.md`:** still points at `e2e/scripts/rest-*.sh`, which no longer exist. The crumb and cookie helpers are in `scripts/lib.sh`.
+- **Request:** `.github/test-shards.txt`. The per-group time estimates in the header predate several new classes, and they need a timed Build run.
+
 ## 2026-10-18 02:30 — Wave D UI (D1–D3) and five bugs merged; D4 held; e2e split between local and CI
 - **Merged since the last entry**, each with red tests first and an e2e unit:
   - UI (#18, #6):
