@@ -85,7 +85,7 @@ def read_artefacts(base):
             rows = [{"page": m[0], "help": m[1], "before": int(m[2]), "after": int(m[3])}
                     for m in re.findall(r"^(\S+) (\S+) (\d+) -> (\d+)$", Path(logs[0]).read_text(), re.M)]
             units.append({"driver": "help2", "shard": shard, "rows": rows, "ctx": {}})
-        for name in ("grant_overlay", "assign_roles", "manage_roles", "endpoints"):
+        for name in ("grant_overlay", "assign_roles", "manage_roles", "manage_edit", "endpoints"):
             f = Path(out, "role", name + ".jsonl")
             if f.exists():
                 units.append({"driver": "role/" + name, "shard": shard, "rows": _jsonl(f)[-1:], "ctx": {}})
@@ -293,6 +293,31 @@ D70_LINE = ("error: Refused to execute script from 'http://localhost:18080/jenki
             "('text/html') is not executable, and strict MIME type checking is enabled.")
 
 
+def _manage_edit(change=None, **parts):
+    """manage_roles.py's #31 res (judge_role "manage_edit") as a green run logs it; `change` replaces top-level keys,
+    `parts` updates the nested dialog dicts (pattern_dialog, delete_dialog, template_add_dialog, template_delete_dialog)."""
+    new, old, perms, tperms = "prod(/.*)?", "prod/.*", "[hudson.model.Item.Read]", "[hudson.model.Item.Read, hudson.model.Item.Workspace]"
+    items = ["prod", "prod » adm-job", "prod » x"]
+    res = {"arrange addRole": 200, "server role before": f"{old} {perms}", "card before": [1, old],
+           "edit dialog": "Edit role: e2e31-prod", "save enabled": True, "edit closed": True, "card after reload": [1, new],
+           "server role after edit": f"{new} {perms}", "strategy after edit": h1.RS_STRATEGY, "server matching": items,
+           "pattern dialog": {"opened": True, "title": f'Items matching "{new}"', "items": items, "closed": True},
+           "delete dialog": {"opened": True, "title": 'Delete role "e2e31-prod"?', "closed on cancel": True,
+                             "listed after cancel": 1, "server after cancel": f"{new} {perms}", "closed on ok": True},
+           "listed after delete": 0, "server role after delete": "none", "strategy after delete": h1.RS_STRATEGY,
+           "console": [], "bad": [],
+           "template add dialog": {"opened": True, "title": "Add permission template", "closed": True},
+           "template listed after reload": 1, "server template after add": tperms, "strategy after template add": h1.RS_STRATEGY,
+           "template delete dialog": {"opened": True, "title": 'Delete template "e2e31-tpl"?', "closed": True},
+           "template listed after delete": 0, "server template after delete": "none",
+           "strategy after template delete": h1.RS_STRATEGY, "template console": [], "template bad": [],
+           "requests": ["200 POST /role-strategy/strategy/addRole", "200 GET /role-strategy/strategy/getMatchingJobs?pattern=x"]}
+    for k, v in parts.items():
+        res[k.replace("_", " ")] = dict(res[k.replace("_", " ")], **v)
+    res.update(change or {})
+    return res
+
+
 def _endpoints(change=None):
     """endpoints.py's res as the script holds it when it calls report(): RS-7 values are tuples, not JSON lists."""
     rs7 = {k: tuple(v) if isinstance(v, list) else v for k, v in h1.RS7.items()}
@@ -400,8 +425,8 @@ def _btn(label, color, before, classes):
 
 
 def _destructive(where, control, **change):
-    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke"}[control]
-    r = {"where": where, "control": control, "user": "admin" if control == "Revoke" else "requester", "page": "/batch-control/x/",
+    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke", "Revert to the plain strategy": "Revert to plain strategy"}[control]
+    r = {"where": where, "control": control, "user": "requester" if control == "Cancel Request" else "admin", "page": "/batch-control/x/",
          "http": 200, "probe": RED, "around": TEXT, "count": 1,
          "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
                     "classes": "jenkins-button jenkins-!-destructive-color confirmation-link"},
@@ -419,7 +444,7 @@ def _destructive(where, control, **change):
 
 
 def _destructive_rows(drop=None, **changes):
-    """All five D rows; `changes` maps a row's where (spaces as _) to its changes."""
+    """All six D rows; `changes` maps a row's where (spaces as _) to its changes."""
     return [_destructive(w, c, **changes.get(w.replace(" ", "_"), {})) for w, c in h1.DESTRUCTIVE_CONTROLS if w != drop]
 
 
@@ -465,6 +490,127 @@ def _badge_rows(**change):
     for k, v in change.items():
         rows[k.replace("_", "-")] = v
     return [r for r in rows.values() if r is not None]
+
+
+# #31 (r11/s_tabs.py #2): round3.py C rows of the tab bar at 1024 and 800 px as main renders them (2026-11-06: admin's
+# eight tabs on one row at 1024 and two rows at 800, the page as wide as the viewport).
+NARROW_TABS = ("overview", "requests", "activations", "grants", "changes", "dashboard", "incidents", "history")
+
+
+def _narrow(user, width, **change):
+    rights = [135, 301, 426, 521, 631, 754, 866, 966] if width == 1024 else [129, 295, 420, 515, 625, 748, 128, 228]
+    tabs = [{"tab": t, "left": r - 100, "right": r, "top": 126 if width == 1024 or i < 6 else 168, "visible": True}
+            for i, (t, r) in enumerate(zip(NARROW_TABS, rights))]
+    r = {"user": user, "width": width, "status": 200, "nav": True, "scrollW": width, "clientW": width, "navLeft": 20,
+         "navRight": width - 20, "navH": 38 if width == 1024 else 80, "navScrollW": width - 40, "navClientW": width - 40,
+         "overflowX": "visible", "rows": 1 if width == 1024 else 2, "tabs": tabs}
+    r.update(change)
+    return r
+
+
+def _narrow_rows(drop=None, **changes):
+    """One row per user and width; `changes` maps "<user>_<width>" (dashes as _) to its changes."""
+    return [_narrow(u, w, **changes.get(f"{u}_{w}".replace("-", "_"), {})) for u in h1.TAB_BAR_NARROW_USERS
+            for w in h1.TAB_BAR_NARROW_WIDTHS if (u, w) != drop]
+
+
+# #31 (r9/s89.py #4, r10/s89.py): round3.py F rows of the grants page at 1280 px as main renders them (2026-11-06): the
+# headers on one line; only cells that wrap between words are listed (Scope between kind and name, two approvers, two
+# actions, a date between date and time, a How of four words).
+GRANT_HEADS = {"pending": ["ID", "Scope", "Actions", "Duration", "Reason", "Requester", "Approvers", "Created"],
+               "active": ["ID", "User", "Scope", "Actions", "Names", "Granted", "Expires", "Remaining", ""],
+               "ended": ["ID", "User", "Scope", "Actions", "Names", "Ended", "How", ""]}
+
+
+def _wrap_cell(col, text, lines=2, broken=(), row=0):
+    return {"row": row, "col": col, "text": text, "lines": lines, "broken": list(broken)}
+
+
+def _wrap_table(lst, cells=None, rows=3, heads=None):
+    heads = heads or [{"text": h, "lines": 1 if h else 0} for h in GRANT_HEADS[lst]]
+    if cells is None:
+        cells = {"pending": [_wrap_cell("Scope", "Pipeline batch-pipeline"), _wrap_cell("Approvers", "approver-1, approver-2"),
+                             _wrap_cell("Created", "2026-11-06 00:46:19 KST"), _wrap_cell("Reason", "e2e-14 new grant dialog")],
+                 "active": [_wrap_cell("Actions", "CREATE, CONFIGURE"), _wrap_cell("Expires", "2026-11-06 01:47:51 KST")],
+                 "ended": [_wrap_cell("How", "Revoked (its item was deleted) by fonly"),
+                           _wrap_cell("Scope", "Freestyle project ops/del-me")]}[lst]
+    return {"list": lst, "rows": rows, "width": 1036, "heads": heads, "cells": cells, "read": rows * len(GRANT_HEADS[lst])}
+
+
+def _wrap_row(user, **tables):
+    """A grants page row; `tables` replaces a list's table (None drops it)."""
+    out = []
+    for lst in ("pending", "active", "ended"):
+        t = tables.get(lst, _wrap_table(lst))
+        if t is not None:
+            out.append(t)
+    return {"user": user, "status": 200, "viewport": 1280, "clientW": 1280, "tables": out}
+
+
+def _wrap_rows(**by_user):
+    return [by_user.get(u.replace("-", "_"), _wrap_row(u)) for u in ("admin", "approver-1", "requester", "fonly")]
+
+
+# #31 (r7/e_dark.py #3, r11/s_dark_monitor.py #2): misc.py K rows of the dark palette as main renders them (2026-11-06):
+# the theme's variables read by probes (raw computed value and canvas-normalised "r,g,b,a"), the light ones read before
+# the switch.
+def _col(raw, n):
+    return {"raw": raw, "n": n}
+
+
+DK_VARS = {"background": _col("oklch(0.175 0.013 265)", "14,16,22,255"), "text": _col("oklch(0.98 0.015 265)", "243,249,255,255"),
+           "table": _col("oklch(0.214375 0.014875 265)", "22,25,32,255"), "body": _col("oklch(0.175 0.013 265)", "14,16,22,255"),
+           "head": _col("oklch(0.98 0.015 265)", "243,249,255,255"), "button": _col("oklch(0.7 0.038 265 / 0.075)", "148,161,188,19"),
+           "alert_info_bg": _col("color(srgb 0.323101 0.524981 1.03104 / 0.04)", "77,128,255,10"),
+           "alert_info_text": _col("oklch(0.6513 0.1987 265)", "82,134,255,255"),
+           "alert_warning_bg": _col("color(srgb 1.06081 0.61102 -0.0705559 / 0.04)", "255,153,0,10"),
+           "alert_warning_text": _col("color(srgb 1.03958 0.683781 0.14674)", "255,174,37,255"),
+           "alert_danger_bg": _col("color(srgb 1.03122 0.235419 0.163984 / 0.04)", "255,51,51,10"),
+           "alert_danger_text": _col("oklch(0.6682 0.2393 29.84)", "255,60,42,255")}
+LT_VARS = dict(DK_VARS, background=_col("rgb(254, 254, 254)", "254,254,254,255"), text=_col("oklch(0.05 0.075 256.91)", "1,0,16,255"),
+               table=_col("oklch(0.969994 0.00567106 256.91)", "243,245,249,255"), body=_col("rgb(254, 254, 254)", "254,254,254,255"),
+               head=_col("oklch(0.05 0.075 256.91)", "1,0,16,255"), button=_col("oklch(0.6 0.075 256.91 / 0.075)", "72,96,138,19"))
+WHITE_C, DARK_TEXT_C, NONE_C = _col("rgb(255, 255, 255)", "255,255,255,255"), _col("rgb(26, 26, 26)", "26,26,26,255"), _col("rgba(0, 0, 0, 0)", "0,0,0,0")
+SECONDARY_C = _col("color(srgb 0.670653 0.710117 0.791742)", "171,181,202,255")
+
+
+def _dk_table(lst="pending", **change):
+    v = DK_VARS
+    t = {"list": lst, "bg": v["table"], "cells": [{"tag": "td", "cls": "batch-control-nowrap", "bg": v["body"], "color": v["text"]},
+                                                  {"tag": "td", "cls": "", "bg": v["body"], "color": v["text"]}],
+         "heads": [{"text": "ID", "color": v["head"]}, {"text": "Scope", "color": v["head"]}]}
+    t.update(change)
+    return t
+
+
+def _dk_page(page, tables=(), alerts=(), tab="requests", **change):
+    v = DK_VARS
+    r = {"page": page, "phase": "dark", "status": 200, "theme": "dark", "vars": v, "tables": list(tables), "alerts": list(alerts),
+         "tab": {"current": {"tab": tab, "color": v["text"], "before": v["button"]},
+                 "other": {"tab": "overview", "color": SECONDARY_C, "before": NONE_C}} if tab else None}
+    r.update(change)
+    return r
+
+
+def _dk_alert(variant="warning", **change):
+    a = {"variant": variant, "cls": f"jenkins-alert jenkins-alert-{variant}", "text": "Batch Control: ...",
+         "bg": DK_VARS[f"alert_{variant}_bg"], "color": DK_VARS[f"alert_{variant}_text"]}
+    a.update(change)
+    return a
+
+
+def _dark_rows(**pages):
+    """The light row and three dark pages (a list, a detail page with a warning, core's job page with two alerts);
+    `pages` replaces a page's row by its key (list, detail, job; None drops it)."""
+    rows = {"list": _dk_page("/batch-control/requests/", [_dk_table("pending"), _dk_table("ended")]),
+            "detail": _dk_page("/batch-control/grants/2a126f3e-4d2b-4a56-a088-9b8b82705480/",
+                               [_dk_table(None, cells=[{"tag": "th", "cls": "", "bg": NONE_C, "color": DK_VARS["text"]},
+                                                       {"tag": "td", "cls": "", "bg": DK_VARS["body"], "color": DK_VARS["text"]}],
+                                          heads=[])], [_dk_alert("warning")], tab="grants"),
+            "job": _dk_page("/job/batch-daily/", [], [_dk_alert("info"), _dk_alert("warning")], tab=None)}
+    rows.update(pages)
+    light = {"page": "/user/admin/appearance/", "phase": "light", "theme": "none", "vars": LT_VARS, "tables": [], "alerts": [], "tab": None}
+    return [light] + [r for r in rows.values() if r is not None]
 
 
 INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
@@ -722,6 +868,54 @@ def synthetic():
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
            "2 approved (window open): requester configure": 200, "3 after a Manage Roles save during the window: requester configure": 403,
            "4 revoked: requester configure": 403, "browser configure after revoke": 403}], {}, "fail", "overlay"),
+        ("role: #31 edit, pattern check, delete and templates as a green run logs them", "role/manage_edit", [_manage_edit()],
+         {}, "pass", None),
+        ("role: #31 Save stays disabled for a valid pattern (the forwarded checkPattern refuses it)", "role/manage_edit",
+         [_manage_edit({"save enabled": False, "edit closed": None, "card after reload": [1, "prod/.*"],
+                        "server role after edit": "prod/.* [hudson.model.Item.Read]"})], {}, "fail", "role-edit"),
+        ("role: #31 the edit saved the pattern but dropped the permissions", "role/manage_edit",
+         [_manage_edit({"server role after edit": "prod(/.*)? []"})], {}, "fail", "role-edit"),
+        ("role: #31 the edit installed the plain role-strategy class", "role/manage_edit",
+         [_manage_edit({"strategy after edit": "RoleBasedAuthorizationStrategy"})], {}, "fail", "role-edit"),
+        ("role: #31 the pattern check lists fewer items than the server matches", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"items": ["prod", "prod » adm-job"]})], {}, "fail", "role-pattern-check"),
+        ("role: #31 more matches than role-strategy asks for: the dialog lists 15 of them", "role/manage_edit",
+         [_manage_edit({"server matching": [f"prod » j{i:02}" for i in range(20)]},
+                       pattern_dialog={"items": [f"prod » j{i:02}" for i in range(15)]})], {}, "pass", None),
+        ("role: #31 more matches than role-strategy asks for, but the dialog lists 3", "role/manage_edit",
+         [_manage_edit({"server matching": [f"prod » j{i:02}" for i in range(20)]},
+                       pattern_dialog={"items": [f"prod » j{i:02}" for i in range(3)]})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the pattern check never opens", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"opened": False, "items": None, "title": None})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the pattern check titled with another pattern", "role/manage_edit",
+         [_manage_edit(pattern_dialog={"title": 'Items matching "prod/.*"'})], {}, "fail", "role-pattern-check"),
+        ("role: #31 the server matches nothing (an empty list proves nothing)", "role/manage_edit",
+         [_manage_edit({"server matching": []}, pattern_dialog={"items": []})], {}, "fail", "role-pattern-check"),
+        ("role: #31 Delete role removes without asking", "role/manage_edit",
+         [_manage_edit(delete_dialog={"opened": False, "title": None, "closed on cancel": None, "listed after cancel": 0,
+                                      "server after cancel": "none"})], {}, "fail", "role-delete"),
+        ("role: #31 Cancel on Delete role removes the role", "role/manage_edit",
+         [_manage_edit(delete_dialog={"listed after cancel": 0, "server after cancel": "none"})], {}, "fail", "role-delete"),
+        ("role: #31 OK on Delete role keeps the role", "role/manage_edit",
+         [_manage_edit({"listed after delete": 1, "server role after delete": "prod(/.*)? [hudson.model.Item.Read]"})], {},
+         "fail", "role-delete"),
+        ("role: #31 Add Template stores other permissions", "role/manage_edit",
+         [_manage_edit({"server template after add": "[hudson.model.Item.Read]"})], {}, "fail", "template-add"),
+        ("role: #31 Add Template's dialog never opens", "role/manage_edit",
+         [_manage_edit({"template listed after reload": 0, "server template after add": "none"},
+                       template_add_dialog={"opened": False, "closed": None})], {}, "fail", "template-add"),
+        ("role: #31 the template delete keeps the template", "role/manage_edit",
+         [_manage_edit({"template listed after delete": 1, "server template after delete": "[hudson.model.Item.Read]"})], {},
+         "fail", "template-delete"),
+        ("role: #31 the template delete swapped the strategy class", "role/manage_edit",
+         [_manage_edit({"strategy after template delete": "RoleBasedAuthorizationStrategy"})], {}, "fail", "template-delete"),
+        ("role: #31 the arrangement failed (addRole 403)", "role/manage_edit",
+         [_manage_edit({"arrange addRole": 403})], {}, "fail", "role-edit-measured"),
+        ("role: #31 the driver raised after the edit", "role/manage_edit",
+         [_manage_edit({"error": "TimeoutError('Locator.click')"})], {}, "fail", "role-edit-measured"),
+        ("role: #31 no manage_edit row at all", "role/manage_edit", [], {}, "fail", "role-edit-measured"),
+        ("role: #31 removeTemplates answered 500", "role/manage_edit",
+         [_manage_edit({"requests": ["500 POST /role-strategy/strategy/removeTemplates"]})], {}, "fail", "role-edit-requests"),
         ("role: RS-7 as the script builds it (tuples) equals the table", "role/endpoints", [_endpoints()], {}, "pass", None),
         ("role: RS-7 with one refusal turned into 200", "role/endpoints", [_endpoints({"checkSidName POST nobc": (200, "")})],
          {}, "fail", "RS-7"),
@@ -762,6 +956,17 @@ def synthetic():
         ("destructive: #31 the grants list's Revoke not measured", "destructive", _destructive_rows(drop="grants list"), {}, "fail",
          "destructive-measured"),
         ("destructive: #31 no row at all (the section did not run)", "destructive", [], {}, "fail", "destructive-measured"),
+        # #31 (r6/s5a.py #5): the configuration page's "Revert to the plain strategy", revealed behind Advanced
+        ("destructive: #31 the revert's dialog not destructive (OK in the accent colour)", "destructive",
+         _destructive_rows(configuration_page={"dialog": {"ok": _btn("Revert to plain strategy", WHITE, ACCENT,
+                                                                     "jenkins-button jenkins-button--primary")}}),
+         {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the revert entry still hidden behind Advanced (not shown, no click)", "destructive",
+         _destructive_rows(configuration_page={"button": {"visible": False}, "dialog": None}), {}, "fail", "destructive-button"),
+        ("destructive: #31 Cancel in the revert dialog reverted the strategy", "destructive",
+         _destructive_rows(configuration_page={"state_after": False}), {}, "fail", "destructive-dialog"),
+        ("destructive: #31 the revert entry not measured", "destructive", _destructive_rows(drop="configuration page"), {},
+         "fail", "destructive-measured"),
         # #31 (r8/rebuild.py): Rebuild Last from the new job page's More actions (gate.py L)
         ("rebuild-menu: #31 offered with its URL, refused, nothing queued, recorded", "rebuild-menu", [_rebuild()], {}, "pass", None),
         ("rebuild-menu: #31 DEF-06: the menu stays empty", "rebuild-menu",
@@ -811,6 +1016,111 @@ def synthetic():
         ("badges: #31 no role shows a badge (the check would pass on nothing)", "badges",
          [_badge_row(u) for u in h1.BADGE_ROLES], {}, "fail", "badge-tooltip-measured"),
         ("badges: #31 no row at all", "badges", [], {}, "fail", "badge-tooltip-measured"),
+        # #31 (r11/s_tabs.py #2): the tab bar at 1024 and 800 px (round3.py C)
+        ("tab-bar-narrow: #31 the bar wraps at 800 px, the page is as wide as the viewport", "tab-bar-narrow", _narrow_rows(),
+         {}, "pass", None),
+        ("tab-bar-narrow: #31 one pixel of sub-pixel rounding is no scroll", "tab-bar-narrow",
+         _narrow_rows(admin_800={"scrollW": 801}), {}, "pass", None),
+        ("tab-bar-narrow: #31 the bar does not wrap and scrolls the page sideways at 800 px", "tab-bar-narrow",
+         _narrow_rows(admin_800={"scrollW": 1066, "navRight": 1046, "rows": 1,
+                                 "tabs": [dict(t, right=t["right"] + 300 * (i // 6)) for i, t in enumerate(_narrow("admin", 800)["tabs"])]}),
+         {}, "fail", "tab-bar-narrow-scroll"),
+        ("tab-bar-narrow: #31 the bar scrolls inside itself (overflow-x auto): tabs out of reach, no page scroll",
+         "tab-bar-narrow", _narrow_rows(approver_1_800={"navScrollW": 1006, "overflowX": "auto"}), {}, "fail",
+         "tab-bar-narrow-reach"),
+        ("tab-bar-narrow: #31 a tab hidden at 1024 px", "tab-bar-narrow",
+         _narrow_rows(admin_1024={"tabs": [dict(t, visible=t["tab"] != "history") for t in _narrow("admin", 1024)["tabs"]]}),
+         {}, "fail", "tab-bar-narrow-reach"),
+        ("tab-bar-narrow: #31 the 1024 px row of approver-1 missing", "tab-bar-narrow", _narrow_rows(drop=("approver-1", 1024)),
+         {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 no tab bar on the overview", "tab-bar-narrow", _narrow_rows(admin_800={"nav": False, "tabs": []}),
+         {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 fewer tabs at 800 px than at 1024 px", "tab-bar-narrow",
+         _narrow_rows(admin_800={"tabs": _narrow("admin", 800)["tabs"][:6]}), {}, "fail", "tab-bar-narrow-measured"),
+        ("tab-bar-narrow: #31 no row at all (section C did not reach the check)", "tab-bar-narrow", [], {}, "fail",
+         "tab-bar-narrow-measured"),
+        # #31 (r9/s89.py #4, r10/s89.py): the grants page's headers and short cells at 1280 px (round3.py F)
+        ("grants-nowrap: #31 cells wrap only between words, headers and short cells on one line", "grants-nowrap",
+         _wrap_rows(), {}, "pass", None),
+        ("grants-nowrap: #31 the free-text Reason splits a long word (allowed)", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Reason", "see https://x/a-very-long-url",
+                                                                                      broken=["https://x/a-very-long-url"])]))),
+         {}, "pass", None),
+        ("grants-nowrap: #31 DEF-01: approver-2 breaks as approver- / 2", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Approvers", "approver-2",
+                                                                                      broken=["approver-2"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 DEF-01: a header on two lines", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", active=_wrap_table("active", heads=[
+             {"text": h, "lines": 2 if h == "Remaining" else 1} for h in GRANT_HEADS["active"]]))),
+         {}, "fail", "grants-nowrap-header"),
+        ("grants-nowrap: #31 a duration '30 min' on two lines (a short cell wrapping between words)", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", pending=_wrap_table("pending", [_wrap_cell("Duration", "30 min")]))),
+         {}, "fail", "grants-nowrap-short"),
+        ("grants-nowrap: #31 Request again on two lines in the button column", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", ended=_wrap_table("ended", [_wrap_cell("", "Request again")]))),
+         {}, "fail", "grants-nowrap-short"),
+        ("grants-nowrap: #31 an item name split inside the Scope cell", "grants-nowrap",
+         _wrap_rows(fonly=_wrap_row("fonly", ended=_wrap_table("ended", [_wrap_cell("Scope", "Freestyle project ops/del-me",
+                                                                                  lines=3, broken=["ops/del-me"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 a date split inside its date part", "grants-nowrap",
+         _wrap_rows(approver_1=_wrap_row("approver-1", active=_wrap_table("active", [_wrap_cell("Granted", "2026-11-06 00:47:51 KST",
+                                                                                            lines=3, broken=["2026-11-06"])]))),
+         {}, "fail", "grants-nowrap-word"),
+        ("grants-nowrap: #31 requester's page without ended entries (premise of 'both tables populated')", "grants-nowrap",
+         _wrap_rows(requester=_wrap_row("requester", ended=None)), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 admin's active list empty", "grants-nowrap",
+         _wrap_rows(admin=_wrap_row("admin", active=_wrap_table("active", [], rows=0))), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 measured at another width", "grants-nowrap",
+         _wrap_rows(admin=dict(_wrap_row("admin"), viewport=1024, clientW=1024)), {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 the admin row missing", "grants-nowrap", _wrap_rows()[1:], {}, "fail", "grants-nowrap-measured"),
+        ("grants-nowrap: #31 no row at all (section F did not reach the grants page)", "grants-nowrap", [], {}, "fail",
+         "grants-nowrap-measured"),
+        # #31 (r7/e_dark.py #3, r11/s_dark_monitor.py #2): the dark palette (misc.py K)
+        ("dark: #31 tables (a detail page's row header left transparent), alerts and the current tab in the dark variables",
+         "dark", _dark_rows(), {"pages": 3},
+         "pass", None),
+        ("dark: #31 a list table with a light background of its own", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", bg=WHITE_C)])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 a table cell painted light (the light theme's --table-body-background kept)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", cells=[
+             {"tag": "td", "cls": "", "bg": LT_VARS["body"], "color": DK_VARS["text"]}])])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 cell text in a dark colour of its own (unreadable on the dark body)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", cells=[
+             {"tag": "td", "cls": "", "bg": DK_VARS["body"], "color": DARK_TEXT_C}])])), {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 a column header in the light theme's text colour", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table("pending", heads=[{"text": "ID", "color": LT_VARS["head"]}])])),
+         {"pages": 3}, "fail", "dark-table"),
+        ("dark: #31 an alert with a white background", "dark",
+         _dark_rows(detail=_dk_page("/batch-control/grants/x/", [], [_dk_alert("warning", bg=WHITE_C)], tab="grants")), {"pages": 3},
+         "fail", "dark-alert"),
+        ("dark: #31 an alert's text in a colour of its own", "dark",
+         _dark_rows(job=_dk_page("/job/batch-daily/", [], [_dk_alert("info", color=DARK_TEXT_C)], tab=None)), {"pages": 3},
+         "fail", "dark-alert"),
+        ("dark: #31 an alert without a variant", "dark",
+         _dark_rows(job=_dk_page("/job/batch-daily/", [], [dict(_dk_alert("info"), variant=None, cls="jenkins-alert")], tab=None)),
+         {"pages": 3}, "fail", "dark-alert"),
+        ("dark: #31 the current tab painted white", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={
+             "current": {"tab": "requests", "color": DARK_TEXT_C, "before": WHITE_C},
+             "other": {"tab": "overview", "color": SECONDARY_C, "before": NONE_C}})), {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the current tab looks like the others (not marked)", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={
+             "current": {"tab": "requests", "color": DK_VARS["text"], "before": DK_VARS["button"]},
+             "other": {"tab": "overview", "color": DK_VARS["text"], "before": DK_VARS["button"]}})), {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the bar shows no current tab", "dark",
+         _dark_rows(list=dict(_dk_page("/batch-control/requests/", [_dk_table()]), tab={"current": None, "other": None})),
+         {"pages": 3}, "fail", "dark-tab"),
+        ("dark: #31 the page stayed light (data-theme none, the light variables)", "dark",
+         _dark_rows(list=_dk_page("/batch-control/requests/", [_dk_table()], theme="none", vars=LT_VARS)), {"pages": 3},
+         "fail", "dark-measured"),
+        ("dark: #31 no light variables read before the switch", "dark", _dark_rows()[1:], {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 a page of K not measured", "dark", _dark_rows(job=None), {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 no alert on any page (alerts never measured)", "dark",
+         _dark_rows(detail=_dk_page("/batch-control/grants/x/", [_dk_table()], [], tab="grants"),
+                    job=_dk_page("/job/batch-daily/", [], [], tab=None)), {"pages": 3}, "fail", "dark-measured"),
+        ("dark: #31 no row at all (section K did not run)", "dark", [], {"pages": 16}, "fail", "dark-measured"),
         # #31 (r6/s6.py): internal design references on a page a user sees
         ("crawl: #31 a design reference (D-61) in a page's text", "crawl",
          [page(req, design={"texts": 80, "skipped": 0, "refs": [{"match": "D-61", "text": "counts as badges (D-61)", "el": "p"}]})],

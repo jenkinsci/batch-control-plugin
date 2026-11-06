@@ -366,8 +366,9 @@ UNITS = [
         ("role-naming", py("r19/naming.py")),  # e2e-19 G-27; re-applies profile-role.yaml at its end
         ("flag-role-crawl", flag("true", *ROLE_CRAWL)),
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
-        last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
-            "window), then a crawl under it (replaces the strategy: last)"),
+        last=True, doc="e2e-13/14 RS: role-strategy 927 profile (#31: Manage Roles edit, pattern check and delete, Permission "
+            "Templates add and delete), e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE window), then a crawl "
+            "under it (replaces the strategy: last)"),
     # e2e-22 R2-04 (bug-hunt batch B). r22/rename_queue.py saves the authorization strategy, applies a Batch Control
     # role-based profile through JCasC for its own items (r22-team-a-*), and restores the strategy, the change-control
     # switch and the built-in node's labels exactly at its end (so it needs no `last`).
@@ -441,12 +442,13 @@ UNITS = [
              "and changes listings and in runs.csv/changes.csv after the controller restarts in another zone (both "
              "directions); the neighbouring day does not list them"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
-    # #31 added section D (r6/s5c.py's destructive controls and dialogs, judged by ci/h1_rules.py "destructive").
+    # #31 added section D (r6/s5c.py's destructive controls and dialogs, judged by ci/h1_rules.py "destructive"; since
+    # r6/s5a.py #5 also the configuration page's revert entry).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGAD"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not; #31: Cancel Request on "
-             "the three request pages and Revoke on the grants list and the window page are red and open a red "
-             "confirmation dialog whose Cancel changes nothing"),
+             "the three request pages, Revoke on the grants list and the window page and the configuration page's "
+             "Revert to the plain strategy are red and open a red confirmation dialog whose Cancel changes nothing"),
     # e2e-27 D1 (Wave D, #18.4 and #18.7). r27/titles_revert.py arranges its own items (folder r27-d1, r27-d1-top-*, the
     # vault folder r27-d1-vault only administrators read, the multibranch project r27-d1/mb over repos/r27-d1.git, a
     # copy of the seed's repository with one more branch), files one window request on the seed's team-mb and cancels it,

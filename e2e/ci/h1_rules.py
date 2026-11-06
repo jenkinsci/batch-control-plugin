@@ -927,6 +927,10 @@ for _u in ("requester", "approver-1"):
     for _p in ("/manage/role-strategy/", "/manage/role-strategy/manage-roles"):
         RS7[f"page {_p} GET {_u}"] = 403
 RS_STRATEGY = "BatchControlRoleBasedAuthorizationStrategy"
+# #31 (r6/s2b.py, r6/s2d.py): what manage_roles.py's second part edits, checks and removes in the browser
+RS_EDIT = {"role": "e2e31-prod", "old": "prod/.*", "new": "prod(/.*)?", "perms": "[hudson.model.Item.Read]",
+           "template": "e2e31-tpl", "template perms": "[hudson.model.Item.Read, hudson.model.Item.Workspace]"}
+RS_MATCH_CAP = 15  # role-strategy 927's manage-roles bundle: getMatchingJobs?maxJobs=15
 
 
 def judge_role(name, res, ctx=None):
@@ -969,6 +973,8 @@ def judge_role(name, res, ctx=None):
                                                       "item role after reload", "add enabled with invalid pattern",
                                                       "server item role", "strategy", "bad")} | {"bad requests": bad_req()})
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
+    elif name == "manage_edit":
+        manage_edit(j, res, bad_req)
     elif name == "endpoints":
         rs6 = res.get("RS-6 admin forwarded == role-strategy") or {}
         bad6 = {k: v[:2] for k, v in rs6.items() if v[0] != 200 or v[1] is not True}
@@ -982,6 +988,74 @@ def judge_role(name, res, ctx=None):
         if res.get("strategy") != RS_STRATEGY:
             j.fail("RS-7", {"strategy": res.get("strategy")})
     return j
+
+
+def manage_edit(j, res, bad_req):
+    """#31 (the retired r6/s2b.py and r6/s2d.py; SPEC: "With the Batch Control role-strategy strategy installed, Manage
+    Roles, item and agent roles ... work"), manage_roles.py's second part in the browser as admin. The endpoints are
+    guarded on the server (T-02-88..92); these rules guard role-strategy's pages driving them under the Batch Control
+    class:
+      * role-edit: the card of the existing item role RS_EDIT["role"] (pattern RS_EDIT["old"]) opens its Edit role dialog,
+        Save is enabled for RS_EDIT["new"] (the forwarded checkPattern accepts it) and closes the dialog; after a reload
+        the card shows the new pattern and the server holds it with the permissions kept, the strategy still RS_STRATEGY;
+      * role-pattern-check: the card's pattern button opens the "Items matching" dialog, titled with the pattern the card
+        shows, which lists exactly the items whose full name that pattern matches on the server (script console,
+        independent of role-strategy; at least one; beyond RS_MATCH_CAP matches, that many of them), and closes (judged
+        on the shown pattern, so a failed edit does not fail this rule as well);
+      * role-delete: Delete role opens a confirmation naming the role; Cancel closes it and keeps the role (unchanged on
+        the server); OK closes it and removes the role (no card after a reload, none on the server), the strategy still
+        RS_STRATEGY;
+      * template-add: on Permission Templates the Add Template dialog creates RS_EDIT["template"] with
+        RS_EDIT["template perms"] (server), listed after a reload, the strategy still RS_STRATEGY;
+      * template-delete: the template card's Delete template, confirmed, removes it (not listed, none on the server),
+        the strategy still RS_STRATEGY;
+      * role-edit-measured: the arrangement (role-strategy's addRole, 200, the role on the server with the old pattern)
+        held, the card was found, and the driver raised nothing;
+      * role-edit-requests, console: no role-strategy request answered >= 400, no unexplained console error."""
+    e = RS_EDIT
+    if (res.get("arrange addRole") != 200 or res.get("server role before") != f"{e['old']} {e['perms']}"
+            or (res.get("card before") or [0])[0] != 1 or res.get("error")):
+        j.fail("role-edit-measured", {k: res.get(k) for k in ("arrange addRole", "server role before", "card before", "error")})
+    if not (res.get("edit dialog") == f"Edit role: {e['role']}" and res.get("save enabled") is True
+            and res.get("edit closed") is True and res.get("card after reload") == [1, e["new"]]
+            and res.get("server role after edit") == f"{e['new']} {e['perms']}" and res.get("strategy after edit") == RS_STRATEGY):
+        j.fail("role-edit", {k: res.get(k) for k in ("edit dialog", "save enabled", "pattern field", "edit closed", "card after reload",
+                                                     "server role after edit", "strategy after edit")})
+    pd, want = res.get("pattern dialog") or {}, res.get("server matching")
+    shown = (res.get("card after reload") or [0, None])[1]
+    listed = pd.get("items")
+    # role-strategy asks for at most RS_MATCH_CAP items (maxJobs): beyond that the dialog lists that many of the matches
+    full = (listed == want if isinstance(want, list) and len(want) <= RS_MATCH_CAP
+            else isinstance(listed, list) and len(listed) == RS_MATCH_CAP and set(listed) <= set(want or []))
+    if not (pd.get("opened") and shown and f'"{shown}"' in (pd.get("title") or "") and isinstance(want, list) and want
+            and full and pd.get("closed") is True):
+        j.fail("role-pattern-check", {"shown": shown, "dialog": {k: pd.get(k) for k in ("opened", "title", "closed")},
+                                      "listed": pd.get("items"), "server": want})
+    dd = res.get("delete dialog") or {}
+    if not (dd.get("opened") and e["role"] in (dd.get("title") or "") and dd.get("closed on cancel") is True
+            and dd.get("listed after cancel") == 1 and dd.get("server after cancel") not in (None, "none")
+            and dd.get("server after cancel") == res.get("server role after edit")
+            and dd.get("closed on ok") is True and res.get("listed after delete") == 0
+            and res.get("server role after delete") == "none" and res.get("strategy after delete") == RS_STRATEGY):
+        j.fail("role-delete", dict(dd, **{k: res.get(k) for k in ("listed after delete", "server role after delete",
+                                                                 "strategy after delete")}))
+    ta = res.get("template add dialog") or {}
+    if not (ta.get("opened") and ta.get("closed") is True and res.get("template listed after reload") == 1
+            and res.get("server template after add") == e["template perms"]
+            and res.get("strategy after template add") == RS_STRATEGY):
+        j.fail("template-add", dict(ta, **{k: res.get(k) for k in ("template listed after reload", "server template after add",
+                                                                  "strategy after template add")}))
+    td = res.get("template delete dialog") or {}
+    if not (td.get("opened") and e["template"] in (td.get("title") or "") and td.get("closed") is True
+            and res.get("template listed after delete") == 0 and res.get("server template after delete") == "none"
+            and res.get("strategy after template delete") == RS_STRATEGY):
+        j.fail("template-delete", dict(td, **{k: res.get(k) for k in ("template listed after delete",
+                                                                     "server template after delete",
+                                                                     "strategy after template delete")}))
+    if bad_req() or res.get("bad") or res.get("template bad"):
+        j.fail("role-edit-requests", {"bad requests": bad_req(), "bad": res.get("bad"), "template bad": res.get("template bad")})
+    j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
+    j.console("console", res.get("template console"), {"role": "admin", "page": "/manage/role-strategy/permission-templates"})
 
 
 # ------------------------------------------------------------------ r15
@@ -1101,10 +1175,11 @@ def _permalinks_entries(c):
 
 
 # ------------------------------------------------------------------ entry point for the drivers
-# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py)
+# ------------------------------------------------------------------ r21/reject_color.py D (#31, r6/s5c.py, r6/s5a.py #5)
 # The destructive controls section D measures: (where, control). Each must have a row (destructive-measured).
 DESTRUCTIVE_CONTROLS = (("run request", "Cancel Request"), ("permission window request", "Cancel Request"),
-                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"))
+                        ("activation request", "Cancel Request"), ("grants list", "Revoke"), ("window", "Revoke"),
+                        ("configuration page", "Revert to the plain strategy"))
 
 
 def _painted(button, probe, probe_n):
@@ -1119,10 +1194,11 @@ def _painted(button, probe, probe_n):
 
 
 def judge_destructive(rows, ctx=None):
-    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"): Cancel Request on the three
-    request pages and Revoke on the grants list and on the window's page render in the theme's destructive colour and
-    open core's destructive confirmation dialog. Colours are compared with a probe styled color: var(--destructive-color)
-    on the same page (reject_color.py D):
+    """#31 (the retired r6/s5c.py; e2e-06 S5c "red destructive controls and dialogs"; r6/s5a.py #5): Cancel Request on
+    the three request pages, Revoke on the grants list and on the window's page, and "Revert to the plain strategy" on
+    the Batch Control configuration page (behind core's Advanced button, which the driver presses first) render in the
+    theme's destructive colour and open core's destructive confirmation dialog. Colours are compared with a probe styled
+    color: var(--destructive-color) on the same page (reject_color.py D):
       * destructive-measured: every DESTRUCTIVE_CONTROLS entry has a row, and its probe resolves to a colour of its own
         (it differs from the text around the control; an undefined variable would make every comparison vacuous);
       * destructive-button: the control ("button": a.confirmation-link styled as a button) is on the page, shown, and
@@ -1130,7 +1206,7 @@ def judge_destructive(rows, ctx=None):
       * destructive-dialog: a click opens a dialog whose OK button is red (its computed colour, background or ::before
         background is the dialog's probe: core's .jenkins-button--primary[class*=color]) and whose Cancel button is
         not; Cancel closes it and nothing changed on the server (the request still pending, the window still
-        conferring Configure)."""
+        conferring Configure, a Batch Control strategy still installed)."""
     j = Judge("destructive", ctx)
     seen = {(r.get("where"), r.get("control")) for r in rows}
     for where, control in DESTRUCTIVE_CONTROLS:
@@ -1161,7 +1237,8 @@ def judge_destructive(rows, ctx=None):
         if r.get("closed_on_cancel") is not True:
             problems.append("Cancel did not close the dialog")
         if r.get("state_before") is not True or r.get("state_after") is not True:
-            problems.append("the request is no longer pending or the window no longer confers (or never did)")
+            problems.append("the request is no longer pending, the window no longer confers or the Batch Control strategy "
+                            "is no longer installed (or that never held)")
         if problems:
             j.fail("destructive-dialog", dict(key, problems=problems),
                    {"ok": ok, "cancel": cancel, "probe": dprobe, "state": [r.get("state_before"), r.get("state_after")]})
@@ -1266,6 +1343,199 @@ def judge_badges(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py C (#31, r11/s_tabs.py #2)
+# The bars round3.py C measures on /batch-control/ at narrow widths: admin has every tab, approver-1 every tab of its
+# sections with badges (its bar already takes two rows at 1024 px).
+TAB_BAR_NARROW_USERS = ("admin", "approver-1")
+TAB_BAR_NARROW_WIDTHS = (1024, 800)
+NARROW_TOLERANCE_PX = 2  # sub-pixel rounding of text widths, as round3.py's SCROLL_TOLERANCE_PX
+
+
+def judge_tab_bar_narrow(rows, ctx=None):
+    """#31 (the retired r11/s_tabs.py #2; e2e-11 R4-7: the bar "wraps to 2 rows at 1024 and 800, with no horizontal
+    scroll"): the Batch Control tab bar may wrap at a narrow width, but it neither makes the page scroll sideways nor puts
+    a tab out of reach. round3.py C opens /batch-control/ (the overview: the bar and badges, nothing else that is wide,
+    so a sideways scroll there comes from the bar) as each TAB_BAR_NARROW_USERS user at each TAB_BAR_NARROW_WIDTHS width:
+      * tab-bar-narrow-scroll: the document's scroll width is at most its client width (+ NARROW_TOLERANCE_PX);
+      * tab-bar-narrow-reach: every tab is shown and lies inside the viewport (left >= 0, right <= client width + the
+        tolerance), and the bar has no hidden overflow of its own (its scroll width at most its client width + the
+        tolerance: tabs clipped or scrolled inside the bar are out of reach too);
+      * tab-bar-narrow-measured: a row for each user and width whose page answered 200 with the bar and its tabs measured,
+        the same number of tabs at every width of a user. How many rows the bar takes is recorded, not judged."""
+    j = Judge("tab-bar-narrow", ctx)
+    tol = NARROW_TOLERANCE_PX
+    seen = {(r.get("user"), r.get("width")): r for r in rows}
+    counts = {}
+    for user in TAB_BAR_NARROW_USERS:
+        for width in TAB_BAR_NARROW_WIDTHS:
+            r = seen.get((user, width))
+            key = {"user": user, "width": width}
+            if r is None:
+                j.fail("tab-bar-narrow-measured", dict(key, row="missing"))
+                continue
+            tabs = r.get("tabs")
+            if r.get("status") != 200 or not r.get("nav") or not isinstance(tabs, list) or not tabs:
+                j.fail("tab-bar-narrow-measured", dict(key, status=r.get("status"), nav=r.get("nav"),
+                                                       tabs=None if tabs is None else len(tabs)), {"error": r.get("error")})
+                continue
+            counts.setdefault(user, set()).add(len(tabs))
+            if (r.get("scrollW") or 0) > (r.get("clientW") or 0) + tol:
+                j.fail("tab-bar-narrow-scroll", dict(key, scrollW=r.get("scrollW"), clientW=r.get("clientW")),
+                       {"navRight": r.get("navRight"), "rows": r.get("rows"), "overflowX": r.get("overflowX")})
+            out = [t.get("tab") for t in tabs if not t.get("visible") or (t.get("left") or 0) < 0
+                   or (t.get("right") or 0) > (r.get("clientW") or 0) + tol]
+            hidden = (r.get("navScrollW") or 0) > (r.get("navClientW") or 0) + tol
+            if out or hidden:
+                j.fail("tab-bar-narrow-reach", dict(key, out_of_reach=out, bar_overflow=hidden),
+                       {"navScrollW": r.get("navScrollW"), "navClientW": r.get("navClientW"), "clientW": r.get("clientW"),
+                        "overflowX": r.get("overflowX")})
+    for user, n in counts.items():
+        if len(n) > 1:
+            j.fail("tab-bar-narrow-measured", {"user": user, "problem": "the number of tabs differs between widths",
+                                               "tabs": sorted(n)})
+    return j
+
+
+# ------------------------------------------------------------------ r14/round3.py F (#31, r9/s89.py #4, r10/s89.py)
+# The users whose grants page must show all three lists (the seed gives requester, and so admin, pending requests,
+# active windows and ended ones); round3.py F measures every user it visits.
+GRANTS_WRAP_USERS = ("admin", "requester")
+GRANTS_LISTS = ("pending", "active", "ended")
+# Short columns stay on one line (GrantsSection/index.jelly: the id, the user or requester, the duration, the Names
+# restriction, the remaining time and the column of the Revoke and Request again buttons, whose header is empty).
+GRANTS_SHORT_COLUMNS = ("ID", "User", "Requester", "Duration", "Names", "Remaining", "")
+GRANTS_FREE_TEXT = ("Reason",)  # the requester's own words, which may break anywhere
+
+
+def judge_grants_nowrap(rows, ctx=None):
+    """#31 (the retired r9/s89.py #4 and r10/s89.py; e2e-09 DEF-01 "approver-2 breaks as approver- / 2", header "New job
+    names" on 3 lines; e2e-10 DEF-04 "the How text is a state line and may wrap"): at 1280 px, with pending, active and
+    ended entries listed, the grants page's tables keep headers and short cells on one line. round3.py F reads every
+    table[data-batch-control-list] on /batch-control/grants/ for each user it visits:
+      * grants-nowrap-header: every header cell's text takes one line;
+      * grants-nowrap-short: every cell of a GRANTS_SHORT_COLUMNS column takes one line;
+      * grants-nowrap-word: no other cell, the free-text Reason excepted, splits a word (a run of non-blank characters:
+        an item name, an approver name, an action, a date or time part, a word of How) across two lines; those cells
+        may wrap only between words (Scope between kind and name, Approvers and Actions between entries, a date between
+        date and time, How anywhere between words);
+      * grants-nowrap-measured: a row for each GRANTS_WRAP_USERS user whose page answered 200 in a viewport 1280 px
+        wide and showed each of GRANTS_LISTS with at least one entry, every cell read."""
+    j = Judge("grants-nowrap", ctx)
+    by_user = {r.get("user"): r for r in rows}
+    for user in GRANTS_WRAP_USERS:
+        r = by_user.get(user)
+        if r is None:
+            j.fail("grants-nowrap-measured", {"user": user, "row": "missing"})
+            continue
+        lists = {t.get("list"): t for t in r.get("tables") or []}
+        thin = [x for x in GRANTS_LISTS if not (lists.get(x) or {}).get("rows")]
+        unread = [x for x, t in lists.items() if (t.get("read") or 0) < (t.get("rows") or 0)]
+        if r.get("status") != 200 or r.get("viewport") != 1280 or thin or unread:
+            j.fail("grants-nowrap-measured", {"user": user, "status": r.get("status"), "viewport": r.get("viewport"),
+                                              "lists without entries": thin, "unread": unread}, {"error": r.get("error")})
+    for r in rows:
+        user = r.get("user")
+        for t in r.get("tables") or []:
+            key = {"user": user, "list": t.get("list")}
+            for h in t.get("heads") or []:
+                if (h.get("lines") or 0) > 1:
+                    j.fail("grants-nowrap-header", dict(key, header=h.get("text"), lines=h.get("lines")))
+            for c in t.get("cells") or []:
+                col = c.get("col")
+                if col in GRANTS_SHORT_COLUMNS and (c.get("lines") or 0) > 1:
+                    j.fail("grants-nowrap-short", dict(key, column=col, lines=c.get("lines")), {"text": c.get("text")})
+                elif col not in GRANTS_FREE_TEXT and c.get("broken"):
+                    j.fail("grants-nowrap-word", dict(key, column=col, words=c.get("broken")), {"text": c.get("text")})
+    return j
+
+
+# ------------------------------------------------------------------ r14/misc.py K (#31, r7/e_dark.py #3, r11/s_dark_monitor.py #2)
+def _n(c):
+    """The canvas-normalised "r,g,b,a" of a measured colour ({raw, n}), or None."""
+    return (c or {}).get("n")
+
+
+def judge_dark(rows, ctx=None):
+    """#31 (the retired r7/e_dark.py #3 and r11/s_dark_monitor.py #2): in the dark theme the Batch Control tables,
+    alerts and current tab take the dark palette, not light colours of their own. "The dark palette" is the theme's own
+    CSS variables, read on the same page by probes (misc.py K, DARK_JS: a span styled with var(--x), as the destructive
+    probe), for the colours core's components take from the theme; colours compare canvas-normalised ("r,g,b,a"):
+      * dark-table: on a Batch Control page every shown .jenkins-table paints var(--table-background); each cell (td) of
+        its first row var(--table-body-background) in var(--text-color), a row header (th) of that row is written in
+        var(--text-color) over the table's background; each column header in var(--table-header-foreground);
+      * dark-alert: every shown .jenkins-alert has a variant (success, info, warning, danger) and paints
+        var(--alert-<variant>-bg-color) in var(--alert-<variant>-text-color);
+      * dark-tab: the current tab of the tab bar is written in var(--text-color) on var(--button-background) (its
+        ::before, where core paints a button's background) and looks different from the other tabs (still marked);
+      * dark-measured: the light theme's variables were read before the switch (row "light"); a dark row for each page
+        misc.py K visits (ctx "pages") that answered 200 with data-theme "dark" and whose --background and --text-color
+        differ from the light ones (the theme really changed the palette, so the comparisons are not light against
+        light); and over all pages at least one table, one alert and one current tab measured."""
+    j = Judge("dark", ctx)
+    light = next((r for r in rows if r.get("phase") == "light"), None)
+    lv = (light or {}).get("vars") or {}
+    if not _n(lv.get("background")) or not _n(lv.get("text")):
+        j.fail("dark-measured", {"light": "missing" if light is None else "no variables"})
+    dark = [r for r in rows if r.get("phase") == "dark"]
+    want = (ctx or {}).get("pages")
+    if not dark or (want is not None and len(dark) != want):
+        j.fail("dark-measured", {"dark rows": len(dark), "pages": want})
+    tables = alerts = tabs = 0
+    for r in dark:
+        page, v = r.get("page"), r.get("vars") or {}
+        key = {"page": page_key(page or "")}
+        if (r.get("status") != 200 or r.get("theme") != "dark" or not _n(v.get("background"))
+                or _n(v.get("background")) == _n(lv.get("background")) or _n(v.get("text")) == _n(lv.get("text"))):
+            j.fail("dark-measured", dict(key, status=r.get("status"), theme=r.get("theme")),
+                   {"background": [_n(lv.get("background")), _n(v.get("background"))], "text": [_n(lv.get("text")), _n(v.get("text"))],
+                    "error": r.get("error")})
+            continue
+        for t in r.get("tables") or []:
+            tables += 1
+            tkey = dict(key, list=t.get("list"))
+            bad = []
+            if _n(t.get("bg")) != _n(v.get("table")):
+                bad.append({"part": "table", "bg": (t.get("bg") or {}).get("raw"), "want": (v.get("table") or {}).get("raw")})
+            for i, c in enumerate(t.get("cells") or []):
+                # a row header (th, the label column of a detail page's table) is left transparent by core, over the
+                # table's own background; its text colour is judged
+                paint = c.get("tag") == "th" or _n(c.get("bg")) == _n(v.get("body"))
+                if not paint or _n(c.get("color")) != _n(v.get("text")):
+                    bad.append({"part": f"cell {i}", "bg": (c.get("bg") or {}).get("raw"), "color": (c.get("color") or {}).get("raw"),
+                                "cls": c.get("cls")})
+            for h in t.get("heads") or []:
+                if _n(h.get("color")) != _n(v.get("head")):
+                    bad.append({"part": f"header {h.get('text')}", "color": (h.get("color") or {}).get("raw")})
+            if bad:
+                j.fail("dark-table", dict(tkey, parts=sorted({b["part"].split()[0] for b in bad})),
+                       {"bad": bad[:4], "want": {k: (v.get(k) or {}).get("raw") for k in ("table", "body", "text", "head")}})
+        for a in r.get("alerts") or []:
+            alerts += 1
+            var = a.get("variant")
+            bg, fg = v.get(f"alert_{var}_bg"), v.get(f"alert_{var}_text")
+            if not var or _n(a.get("bg")) != _n(bg) or _n(a.get("color")) != _n(fg):
+                j.fail("dark-alert", dict(key, variant=var),
+                       {"text": a.get("text"), "bg": (a.get("bg") or {}).get("raw"), "color": (a.get("color") or {}).get("raw"),
+                        "want": [(bg or {}).get("raw"), (fg or {}).get("raw")]})
+        tab = r.get("tab")
+        if tab is not None:
+            cur, other = tab.get("current") or {}, tab.get("other") or {}
+            if not cur:
+                j.fail("dark-tab", dict(key, problem="no current tab"))
+                continue
+            tabs += 1
+            looks = lambda x: (_n(x.get("color")), _n(x.get("before")))  # noqa: E731
+            if _n(cur.get("color")) != _n(v.get("text")) or _n(cur.get("before")) != _n(v.get("button")) or looks(cur) == looks(other):
+                j.fail("dark-tab", dict(key, tab=cur.get("tab")),
+                       {"current": [(cur.get("color") or {}).get("raw"), (cur.get("before") or {}).get("raw")],
+                        "other": [(other.get("color") or {}).get("raw"), (other.get("before") or {}).get("raw")],
+                        "want": [(v.get("text") or {}).get("raw"), (v.get("button") or {}).get("raw")]})
+    if dark and not (tables and alerts and tabs):
+        j.fail("dark-measured", {"tables": tables, "alerts": alerts, "current tabs": tabs,
+                                 "problem": "a kind of element was measured on no page"})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1284,6 +1554,12 @@ def judge(driver, rows, ctx=None):
         return judge_rebuild_menu(rows, ctx)
     if driver == "badges":
         return judge_badges(rows, ctx)
+    if driver == "tab-bar-narrow":
+        return judge_tab_bar_narrow(rows, ctx)
+    if driver == "grants-nowrap":
+        return judge_grants_nowrap(rows, ctx)
+    if driver == "dark":
+        return judge_dark(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

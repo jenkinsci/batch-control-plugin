@@ -111,8 +111,25 @@ references (`design-ref`, `design-ref-measured`), `r21/reject_color.py` D (`dest
 (`rebuild-menu`) and `r14/round3.py` B (`badges`: on `/batch-control/` as admin, requester, approver-1, manager,
 reqonly, approver-2, approver-unlisted and auditor, every shown tab badge carries a non-empty tooltip, core's
 `l:badge` `tooltip` attribute, that contains its number, and a tab without a badge carries none; the wording is not
-judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), next to #129's `helpcheck.py` layout and
-`s_monitor.py` DEF-04 rules.
+judged: `badge-tooltip`, `badge-tooltip-absent`, `badge-tooltip-measured`), `r14/round3.py` C (`tab-bar-narrow`: on
+`/batch-control/` as admin and approver-1 at 1024 and 800 px the tab bar may wrap, but the page does not scroll
+sideways, every tab is shown inside the viewport and the bar has no hidden overflow of its own:
+`tab-bar-narrow-scroll`, `tab-bar-narrow-reach`, `tab-bar-narrow-measured`), `r14/round3.py` F (`grants-nowrap`: on
+`/batch-control/grants/` at 1280 px, with pending, active and ended entries listed for admin and requester, every
+header and every cell of a short column (ID, User, Requester, Duration, Names, Remaining, the button column) takes one
+line and no other cell but Reason splits a word across lines: `grants-nowrap-header`, `grants-nowrap-short`,
+`grants-nowrap-word`, `grants-nowrap-measured`), `r14/misc.py` K (`dark`: in the dark theme every Batch Control
+table, every alert and the current tab paint the theme's own variables, read on the same page by probes styled with
+`var(--x)`: `--table-background`, `--table-body-background`, `--text-color`, `--table-header-foreground`,
+`--alert-<variant>-bg-color`/`-text-color`, `--button-background` on the tab's `::before`; the light variables are read
+before the switch so the comparison is never light against light: `dark-table`, `dark-alert`, `dark-tab`,
+`dark-measured`), `r14/role/manage_roles.py`'s second part (`role/manage_edit`, under the Batch Control role strategy
+as admin: the Edit role dialog of an existing item role saves a new pattern, kept after a reload and on the server with
+its permissions; the card's pattern button lists exactly the items the server matches for the shown pattern; Delete
+role asks first, Cancel keeps and OK removes the role; the Permission Templates Add Template dialog creates a template
+with the chosen permissions and its card's Delete template, confirmed, removes it; the strategy class is read after
+every step: `role-edit`, `role-pattern-check`, `role-delete`, `template-add`, `template-delete`, `role-edit-measured`,
+`role-edit-requests`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -876,8 +893,12 @@ the requester holds (CONFIGURE on `r21-reject`, approved over REST for D and rev
 clicked: core's confirmation dialog must open, its OK button must be red (its computed colour, background or `::before`
 background, where core paints a button's background, equal to a probe inside the dialog, also compared after a canvas
 normalisation so `oklch(...)` and `rgb(...)` match: core's destructive dialog type) and its Cancel button not, and Cancel
-must close it and change nothing (the request still pending, the window still conferring Configure). The rows are judged by `ci/h1_rules.py`
-(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the five
+must close it and change nothing (the request still pending, the window still conferring Configure). Since #31 (the
+check of the retired `r6/s5a.py` #5) admin also opens `/manage/batch-control-configuration/`, presses the Advanced
+button of the form item that holds "Revert to the plain strategy" (D1 #18.7 keeps the entry behind it) and measures
+that entry the same way; Cancel must leave a Batch Control strategy installed (OK is pressed only by
+`r27/titles_revert.py`). The rows are judged by `ci/h1_rules.py`
+(driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the six
 controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
 `-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
 it the shared setup).
@@ -1024,3 +1045,6 @@ Stop with `docker compose -p bc-e2e14 down -v`.
 role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were removed in stage one of #31 (see
 "Removed drivers"): `r14/role/` holds their successors, run by CI under the `/jenkins` prefix (`setup.py` applies
 `casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).
+`manage_roles.py` adds e2e13-global and e2e13-team in the browser (kept for the later scripts), then (#31, the checks
+of the retired `r6/s2b.py` and `r6/s2d.py`) edits, pattern-checks and deletes its own item role e2e31-prod and adds and
+deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`).

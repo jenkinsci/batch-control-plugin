@@ -66,7 +66,7 @@
                   <td class="batch-control-nowrap">${r.request.durationMinutes} min</td>
                   <td>${r.request.reason}</td>
                   <td class="batch-control-nowrap">${r.user}</td>
-                  <td>${it.join(r.request.approvers)}</td>
+                  <td><j:forEach var="approver" items="${r.request.approvers}" varStatus="st">${st.index > 0 ? ', ' : ''}<span class="batch-control-nowrap">${approver}</span></j:forEach></td>
                   <td><j:forEach var="part" items="${it.formatParts(r.request.createdAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
                 </tr>
               </j:forEach>
