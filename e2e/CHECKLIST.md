@@ -583,7 +583,7 @@ re-request link.
 ## 7. Section E — plugin precedence (row ids PR-01..PR-09; E-01..E-10 are the pre-flight rows) (SPEC 6: "the guarantees above hold when other plugins ... are installed and configured")
 
 Each plugin is configured on its own job **in the browser, as an administrator
-would** (`browser/section-e.mjs`); then the requester tries the unapproved or
+would** (`browser/section-e.mjs`, removed by #31 stage three; CI: `r19/plugins.py`); then the requester tries the unapproved or
 unactivated path and the result is judged as the user sees it (sidebar, toast or
 page, build history, the audit record); then the approved or activated path must
 run **exactly once**. Common server check: `nextBuildNumber`, queue, `changes.csv`.
