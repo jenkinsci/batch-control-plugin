@@ -11,8 +11,8 @@ used for the end-to-end passes (`docs/reports/e2e-*.md`).
    leaves `target/batch-control.hpi`, which `docker-compose.yml` mounts.
 3. `cp .env.example .env` and set the four passwords.
 4. For the drivers: Python >= 3.10 with `ci/requirements.txt` (Playwright for Python, pytest); Google Chrome
-   (`BC_BROWSER_CHANNEL=chrome`) or Playwright's Chromium. The Node.js drivers of e2e-01..05 moved to `legacy/`
-   (e2e-20; no CI shard runs them): `cd legacy/browser && npm install` if one is needed again.
+   (`BC_BROWSER_CHANNEL=chrome`) or Playwright's Chromium. Node.js only for the contrast audit
+   `legacy/extra/theme.mjs`, the last Node.js driver (see "Contrast audit").
 
 ## Lifecycle
 
@@ -440,8 +440,8 @@ itself did not succeed. Its log gives the reason in one line.
 - `r14/crawl.py`: the content checks above, and `BC_CRAWL_LOG` names the log (`crawl-role` for the crawl under the
   role profile).
 - Base URL, passwords and ports were already configurable (`BC_BASE`, `e2e/.env`, `BC_PORT`). The `mails()` helpers
-  of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers (now in
-  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set.
+  of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers of e2e-01..05
+  were removed (see "Removed drivers"); the one left, `legacy/extra/theme.mjs`, is not part of the CI set.
 
 ## How it is configured
 
@@ -660,24 +660,23 @@ note 369) or a CI judge, and the drivers' other checks were already guarded. The
 
 What is left in these directories is used by other files; `r9/`, `r10/` and `r11/` are gone:
 - `scripts/`: `up.sh`, `down.sh`, `reset.sh` ("Lifecycle"); `cli.sh` and the `lib.sh` it sources ("Older scenario
-  scripts"; drivers in `legacy/` call `cli.sh`); `ldap-up.sh`, `ldap-down.sh` (the LDAP profile, "Other profiles").
+  scripts", `CHECKLIST.md` 1.5); `ldap-up.sh`, `ldap-down.sh` (the LDAP profile, "Other profiles").
 - `r6/lib.py`: the shared browser driver; `r7/lib.py`, `r8/lib.py`, `r12/lib.py`, `r14/lib.py`, `r14/role/lib.py`,
   `r15/lib.py` and `r16/lib.py` load it by path, and the later `lib.py` files load one of those.
 - `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`: CI setup steps (`ci/shard.py` SETUP), with the `r7/lib.py` and
   `r8/lib.py` they import.
 - `casc/`: `jenkins.yaml` (every boot), `profile-role.yaml` (`r14/role/setup.py`), `profile-role-naming-window.yaml`
-  (`r19/naming.py`), `profile-ldap.yaml` (by hand, "Other profiles"), `profile-role-r3.yaml`
-  (`legacy/browser/verify/role-r3.mjs`).
+  (`r19/naming.py`), `profile-ldap.yaml` (by hand, "Other profiles").
 
 The same stage then removed 128 files from `legacy/` on the same terms (the per-check audit of 2026-11-06). The Node
 drivers only logged; a check counted where the report or the checklist row that ran them judged it.
 
 - `browser/` (39). Section A singles `a01`, `a06-a10-header-menu`, `a11-activation-crumbs`, `a13-nobc-direct-build`,
-  `a15`, `a21`, `a22` (their rows are also in the kept `section-a.mjs`): MatrixStrategyTest, T-02-07, T-SEC-77,
+  `a15`, `a21`, `a22` (their rows are also in `section-a.mjs`, below): MatrixStrategyTest, T-02-07, T-SEC-77,
   ActivationBreadcrumbTest, T-06-90, StrategyMigrationTest, T-08-04/05; `r19/gate.py`, `r19/lifecycle.py` D (mails); h1
   crawl links. Section E, the pre-flight and the HOLD follow-up (`section-e`, `e01-direct-build-toast`, `preflight`,
   `hold-self`): `r19/plugins.py`, `r19/triggers.py`, the PluginInteraction*Test classes, T-06a-02/23/38; the plugin's
-  Rebuild link is gone (LIMITATIONS 41). Other Section B rows (`b4b` and `b14b`, near-copies of the kept `b4` and `b14`;
+  Rebuild link is gone (LIMITATIONS 41). Other Section B rows (`b4b` and `b14b`, near-copies of `b4` and `b14`, below;
   `b5`, `b5-17b`, `b12`, `b13`, `b15`, `b17`, `b17-04`, `b17-ev`, `b18`, `b18b`, `b19`, `b20`): `r19/gate.py`,
   `r14/def07.py`, h1 H-kind, `r18/final.py` E (grant mail), `r16/rerun.py`, `r19/restart.py`, `r27/labels_filters.py`,
   `r23/kill_switch.py`, `r28/grant_blocked.py`; QueueBlockTest, HistoryWebTest, RestartRecoveryTest, DatesClockZoneTest,
@@ -695,8 +694,8 @@ drivers only logged; a check counted where the report or the checklist row that 
   `r19/lifecycle.py` V (the 4,001-character reason), h1 H-kind, ChangeRecordTest, NotificationTest,
   GrantSelfGrantFeedbackTest, DecisionAreaTest; obsolete D-35e/g, D-38a, D-48, D-49, D-52, D-56, D-66, D-67, D-71/71c.
   Probes, dumps and hand-run helpers: `hold`, `pending-start`, `b1rest`, `exp` (expiry: RequestEndStateTest),
-  `d05a`..`d05c`, `explore1`, `f4a`..`f4c`, `role-explore`, `v3b`, and `env.sh`/`env-final.sh` (their variables are
-  under "Re-audit driver").
+  `d05a`..`d05c`, `explore1`, `f4a`..`f4c`, `role-explore`, `v3b`, and `env.sh`/`env-final.sh` (they set `BC_SHOTS`
+  and `BC_ROUND` for the verify and final rounds).
 - `fresh/` (19) and `fresh/v/` (4): `s1-config`, `s1-install`, `s1-strategy`, `s2-create`, `s2-run`, `s2-expiry`,
   `s3-activation`, `s4-revoke`, `s5-incident`, `s6-refusals`, `s7-crawl`, `s7-visibility`, `s8-misc`, `rest-grants.sh`,
   `rest-refusals.sh`, `v/vb-requests`, `v/vb-wait`, `v/vf-misc`, `v/vg-rebuildlast`: `r19/gate.py`, `r19/lifecycle.py`,
@@ -710,69 +709,115 @@ drivers only logged; a check counted where the report or the checklist row that 
   T-06a-20; staying usable while the directory is down is an accepted loss, #126 L19). The LDAP profile stays for checks
   by hand ("Other profiles"; `ci/shard.py` and `r22/approver_case.py` name it for R4-01 (b)).
 
-What is left in `legacy/` is listed under "Legacy Node.js drivers".
+Stage three then removed the last 70 files of `legacy/`, and `casc/profile-role-r3.yaml`, which only
+`verify/role-r3.mjs` applied. Each of the 59 drivers among them held a check that nothing asserted at the audit (44
+gaps); each gap now has a JenkinsRule row (`docs/TEST-MATRIX.md` notes 370 and 371 map each gap to its row), a CI judge
+or a ruling, and the drivers' other checks were already guarded. The other 11 files were libraries, helpers and
+arrangements that only these drivers used. The first names below are the new guards:
 
-## Legacy Node.js drivers (`legacy/`)
+`browser/`
+- `a04.mjs`: T-02-201 MonitorDismissTest (a dismissed monitor, re-enabled).
+- `a19.mjs`: T-UI-307/308 OperatorTextReferenceTest (no internal reference in help texts, mails and CSV exports).
+- `b1.mjs`: T-03-96 ApproverChoiceGuardTest (no approvers configured: the grant and activation forms), T-08-293
+  GrantScreenGuardTest (the custom duration's maximum), T-10-15 RecordingSwitchesOffTest (no run record with both
+  switches off).
+- `b1-21.mjs`: T-01-21 SwitchSaveFailureReportTest (a failed save is logged).
+- `b2.mjs`: T-UI-305 PermissionDescriptionTest.
+- `b3.mjs`, `b6.mjs`: T-05-210 DecidedRequestGuardTest (a decided request offers no Change Approvers, Cancel or decision
+  form).
+- `b4.mjs`: T-UI-306 RequestListOrderTest (the ended lists show the newest first; the order of the pending lists is
+  left to the maintainer, note 370 (4)).
+- `b7.mjs`: T-08-294 GrantScreenGuardTest (reason and actions on the grant request page).
+- `b8-role.mjs`: `r14/role/manage_roles.py` third part (h1 role/manage_perms: the five permissions in both Add Role
+  dialogs).
+- `b10.mjs`: T-08-296 CreationPayloadApproversTest (a REST createItem keeps `jobApprovers`, P-14), T-UI-307.
+- `b11.mjs`: T-09-94 FolderRenameRecordTest (RENAME plus one MOVE per descendant); `r14/misc.py` H (h1 month-nav).
+- `b14.mjs`: `r14/misc.py` H (h1 month-nav: the "«" link, the empty month, Changes paging), T-UI-316
+  IncidentPagingTest.
+- `b21.mjs`: `h3/deploy.py` (h1 deploy: Deploy Plugin on a clean controller resolves the dependencies).
+- `section-a.mjs`: T-UI-309 EntryIconTest, T-UI-310 DetailPageBackLinkTest; `r14/round3.py` C (h1 detail-narrow).
+- `check30/c08.mjs`: T-02-202 MarkedRunJobPageTest (the job page's "changed under a temporary permission window"
+  alert).
+- `check30/links.mjs`: no row: the rebuild plugin offers "Rebuild Last" on no Pipeline job page, and only a Pipeline run
+  can be marked (note 370 (2)); the build page's Rebuild of a marked run stays T-02-83.
+- `lib.mjs`, `package.json`, `package-lock.json`: the library of every driver below `browser/`.
 
-e2e-20 moved the Node.js drivers of e2e-01..05 (`browser/`, `extra/`, `fresh/`) to `legacy/`: no CI shard runs them
-(`ci/shard.py` runs only the Python drivers; nothing outside `legacy/` imports or calls them), and the Python drivers
-`r6/` onwards replaced them (`r6/lib.py` is the port of `extra/lib.mjs`). Stage three of #31 removed every driver whose
-checks CI now asserts (see "Removed drivers"). What is left still holds a check nothing in CI asserts yet (#31), or is
-the library, helper or arrangement such a driver needs; each section below says which check. Several no longer run as
-written (URLs before D-66/D-71, the date-based request ids before D-68, ids of the 2026-09 runs, the broken relative
-paths of `browser/a19.mjs`, `b7.mjs`, `b10.mjs` and `b21.mjs`): they record the check and its expectation for the
-JenkinsRule test or CI step that is to take it over. The reports still give the old paths (`browser/...` is now
-`legacy/browser/...`). The `lib.mjs` files find `e2e/.env` from the new place; scripts that use paths relative to the
-working directory expect to be started from their own directory, as before.
+`browser/audit/`
+- `a03.mjs`, `a03b.mjs`, `a04c.mjs`: T-02-201; T-02-204 MatrixDeprecationLogTest (`a03`: no matrix-auth deprecation
+  warning).
+- `a07.mjs`: T-UI-313 RequestFormControlsTest (an action checkbox's label ticks it).
+- `a19.mjs`: T-UI-307/308.
+- `b1a.mjs`: T-10-15.
+- `b1b.mjs`: T-03-98 ApproverChoiceGuardTest (a case-variant designated approver decides), T-03-97 (the administrator is
+  offered only with self-approval on), T-03-96, T-08-293, T-UI-307.
+- `b1d.mjs`: T-01-22 SwitchSaveFailureReportTest (a failed switch save), T-01-21.
+- `b2.mjs`: T-UI-305.
+- `b3.mjs`: T-UI-311 RequestFormControlsTest (the only approver is ticked), T-05-211 DecidedRequestGuardTest (the refusal
+  names the status).
+- `b4.mjs`: T-UI-315 RequestFormControlsTest and `r14/round3.py` H (h1 request-dialog-cancel): Cancel on the Request Run
+  page and dialog stores nothing; T-05-210/211, T-UI-306.
+- `b6.mjs`: T-07-17 QueuedApprovedRunExpiryTest.
+- `b9.mjs`: T-02-205 PayloadViolationDetailTest.
+- `b10.mjs`: T-08-296, T-06a-114 UncontrolledCreationRecordTest (one ACTIVATED by `(uncontrolled)`), T-UI-308.
+- `b11.mjs`, `b14.mjs`: T-09-94; h1 month-nav, T-UI-316.
+- `sa-read.mjs`: T-UI-309, T-UI-310; h1 detail-narrow.
+- `rec.mjs`, `restsubmit.mjs`, `mail.mjs`, `helpers-e.mjs`, `b14-job.xml` (helpers): used by the removed `audit/`,
+  `verify/` and `check30/` drivers only. `rec.mjs` wrote the rows `reaudit/results.jsonl` keeps (`{id, roles, V, G, R,
+  C, E, note, defect, round}`; the last line per id wins).
 
-### Browser driver (`legacy/browser/`)
+`browser/verify/`
+- `c1.mjs`: no row: the screens show a job's full name, never its display name (note 371 (2)).
+- `c4.mjs`, `c11.mjs`: T-SEC-118 MonitorRefererRedirectTest.
+- `c31.mjs`: T-05-211.
+- `d.mjs`, `d10.mjs`: T-06a-115 ActivationDisableEnableTest.
+- `f1.mjs`, `f2.mjs`, `v2.mjs`, `v2b.mjs`: T-06-113 PipelineRebuildRefusalTest.
+- `f3.mjs`: T-02-203 ChangeControlOffAuthorizationTest.
+- `role-r3.mjs` (with `casc/profile-role-r3.yaml`): no row: the standing-permissions monitor does not see permissions
+  given per item, an item role's among them, a known limit (`docs/LIMITATIONS.md` item 12).
+- `v5.mjs`: T-UI-315, h1 request-dialog-cancel.
+- `v6.mjs`: T-UI-312 FolderCreateWindowNoticeTest; Rename still shown to a window holder is a known limit
+  (LIMITATIONS item 33).
+- `v7.mjs`: T-UI-310, T-UI-308.
 
-`lib.mjs` opens a fresh context per account (real login form), outlines the relevant element in red and saves a clipped
-screenshot to `screenshots/run-3/<name>.png` (`BC_SHOTS` names another directory); `api()` reads server state with basic
-auth; `groovy()` uses the script console only to arrange or read state. Evidence logs go to `out/` (git-ignored).
-`package.json` pins Playwright for every driver below `legacy/browser/` (`npm install` once). Left, because each still
-holds a check nothing in CI asserts yet (#31):
+`fresh/` and `fresh/v/`
+- `s2-more.mjs`: T-05-210/211.
+- `s4-grants.mjs`: T-08-295 GrantScreenGuardTest (a window request for a missing item through the form).
+- `s5-history.mjs`, `v/vd-screens.mjs`: T-10-16 DashboardRequesterCellTest.
+- `v/final-fd.mjs`, `v/ve-refusals.mjs`: T-06-113.
+- `v/vh-expiry.mjs`, with its arrangement `v/setup-expiry.mjs`: T-07-18 ExpiredRequestReasonTest.
+- `v/va-config.mjs`: T-UI-314 ConfigPageRecordingNoteTest (its wording awaits the owner's decision).
+- `lib.mjs`, `.gitignore`: used by `fresh/` only. `s2-setjobs.mjs` moved to `extra/`: the contrast audit opens its jobs.
 
-- `section-a.mjs` (every Batch Control entry carries a non-empty icon; no Back link on the detail pages and forms; the
-  request and grant detail pages do not scroll sideways at 800 px), `a04.mjs` (dismissing a monitor), `a19.mjs` (no
-  internal reference in help texts, mails and CSV exports).
-- `b1.mjs` (the empty approver list on the grant forms; the custom duration states its maximum; no run record with both
-  switches off), `b1-21.mjs` (a failed save is logged), `b2.mjs` (the permission descriptions), `b3.mjs` and `b6.mjs` (a
-  decided request offers no Change Approvers, Cancel or decision form), `b4.mjs` (newest request first), `b7.mjs`
-  (reason and actions on the grant request page), `b8-role.mjs` (role-strategy's Add Role dialog lists the five
-  permissions), `b10.mjs` (a REST createItem keeps `jobApprovers`; help texts), `b11.mjs` (a folder rename writes RENAME
-  and one MOVE per descendant; Changes paging and month links), `b14.mjs` (Incidents paging and month links), `b21.mjs`
-  (Deploy Plugin on a clean LTS resolves the dependencies).
-- `check30/c08.mjs` (the job page's "changed under a temporary permission window" section), `check30/links.mjs` (no
-  Rebuild Last for a non-administrator when the last run is marked).
+`extra/`
+- `stale.mjs`: T-05-211.
+- `race.mjs`: T-05-211, T-05-212 IdenticalRequestRaceTest (two identical run requests at the same moment make one).
 
-### Fresh-pass driver (`legacy/fresh/`)
+What is left in `legacy/` is the contrast audit (next section).
 
-e2e-04 (the fresh-eyes pass) and its re-verification (`v/`). `lib.mjs` serves both; there is no `package.json` here
-(Playwright comes from a local `legacy/fresh/node_modules`, git-ignored). Left:
+## Contrast audit (`legacy/extra/`, #123)
 
-- `s2-setjobs.mjs`: arrangement only; it creates or updates the `fresh-*` jobs that every driver here and in `extra/`
-  opens, and nothing else in the repository defines them.
-- `s2-more.mjs` (a decided request offers no decision form; the losing decision's refusal names the status),
-  `s4-grants.mjs` (a window request for a missing item through the form is refused and stores nothing), `s5-history.mjs`
-  and `v/vd-screens.mjs` (the dashboard's User cell names the requester), `v/final-fd.mjs` and `v/ve-refusals.mjs` (a
-  Pipeline `replay/rebuild` of an approval-required job by a Build holder is refused and recorded), `v/va-config.mjs`
-  (the configuration page says which saves are recorded).
-- `v/vh-expiry.mjs` ("Why it expired" on expired activation and grant requests and in their mails) with
-  `v/setup-expiry.mjs`, which files the requests and writes the `out/verify-expiry.json` it reads.
+`legacy/extra/theme.mjs` (e2e-05 check 1) is the last file of `legacy/` that holds a check: on every Batch Control
+screen per role, in the light and the dark theme, it lists text and controls under 4.5:1 contrast (3:1 for large text)
+and light panels left in a dark page. CI judges the dark palette, not the contrast (h1 dark), so it stays until #123
+decides on a contrast check. With it: `lib.mjs` (a context per account through the login form, the `e2e/.env`
+passwords, base URL `http://localhost:8080` without a context path, captures in `screenshots/run-5/`, logs in `out/`),
+`package.json` and `package-lock.json` (Playwright; it drives the installed Google Chrome) and `s2-setjobs.mjs`, which
+creates or updates the `fresh-*` jobs the screens open. Against the default stack (`scripts/up.sh`):
 
-### Extra checks driver (`legacy/extra/`)
+```bash
+cd legacy/extra && npm install
+node s2-setjobs.mjs fresh-daily fresh-secret
+node theme.mjs setup              # requester files a pending run request and grant request -> out/theme-ids.json
+node theme.mjs set dark           # admin picks the theme on Manage Jenkins -> Appearance; `set none` goes back
+node theme.mjs audit dark admin   # also `audit dark requester`, and `audit light <user>` after `set none`
+```
 
-e2e-05 (dark theme, Back button and two tabs). `extra/lib.mjs` is `fresh/lib.mjs` with screenshots going to
-`screenshots/run-5/` (and the passwords of the removed LDAP drivers' accounts); `cd legacy/extra && npm install` once.
-The drivers open the `fresh-*` jobs of `fresh/s2-setjobs.mjs`. Left:
-
-- `stale.mjs` (`tabs`, `back`, `double`) and `race.mjs` (parallel POSTs from a browser session): the refusal of a stale
-  or losing decision names the current status; two identical run requests at the same moment make one request
-  (`race.mjs`).
-- `theme.mjs` (`setup`, `set`, `audit`): sets the theme through Manage Jenkins -> Appearance (the `dark-theme` plugin,
-  baked into the image) and audits every Batch Control screen per role with a computed WCAG contrast check
-  (`out/theme-*.json`); CI judges the dark palette, not the contrast (#123).
+Each `audit` writes `out/theme-<theme>-<user>.json` (per screen: HTTP status, elements checked, the lowest pairs, light
+boxes). It was written for the 2026-09 stack and runs only partly as written: `setup` stops at its grant step (it
+looks for the form on `grants/`, now `grants/new`), and the screen list names record ids of that stack and the
+configuration page at the root (now under `manage/`), so those screens do not resolve (the JSON keeps each status).
+Until #123 settles it, write `out/theme-ids.json` (`{"run": "<id>", "grant": "<id>"}`) by hand for a pending run
+request and grant request, then `set` and `audit`.
 
 ## e2e-06 driver (`r6/`, Python)
 
@@ -806,32 +851,6 @@ arrangement lives on as `r12/arrange.py`.
 above; a REST-path script sources it with `. "$(dirname "$0")/lib.sh"`. The `rest-*.sh` scripts that used it were
 removed (see "Removed drivers"). `scripts/cli.sh <user> <command>` runs jenkins-cli inside the container (it needs
 Java 21); under `compose.prefix.yml` it needs `BC_PREFIX=/jenkins`.
-
-## Re-audit driver (`legacy/browser/audit/`, `legacy/browser/verify/`)
-
-The five-criterion re-audit of run 3 (checklist 0a, `audit/`) and its re-verification rounds (`verify/`; `check30/` is
-the round check30). `audit/rec.mjs` appends one JSON line per row (`{id, roles, V, G, R, C, E, note, defect, round}`) to
-`out/audit.jsonl`; `reaudit/results.jsonl` keeps the rows of those rounds (the last line per id wins). Run with
-`BC_SHOTS=run-3-audit` (`verify/`: `BC_SHOTS=run-3-verify BC_ROUND=verify`, or `run-3-final` and `final`; `check30/`:
-`BC_SHOTS=run-3-check BC_ROUND=check30`). The helpers `rec.mjs`, `restsubmit.mjs`, `mail.mjs`, `helpers-e.mjs` and
-`b14-job.xml` stay for the drivers that use them. Left, because each still holds a check nothing in CI asserts yet
-(#31):
-
-- `audit/`: `a03`, `a03b`, `a04c` (a dismissed monitor comes back once re-enabled; no matrix-auth `getAllSids`
-  deprecation warning), `a07` (an action checkbox's label ticks it), `a19` (internal references in help, mail and CSV),
-  `b1a` (no run record with both switches off), `b1b` (a case-variant designated approver; the administrator's own form
-  offers `admin` only with self-approval on; the empty approver list; the duration maximum; help texts), `b1d` (a failed
-  switch save in plain words, and logged), `b2` (permission descriptions), `b3` (the only approver ticked; refusals name
-  the status), `b4` (Cancel on the Request Run form stores nothing; a decided request's page and refusals; newest
-  first), `b6` (an approved run waiting in the queue does not expire), `b9` (the GRANT_VIOLATION text of a copy), `b10`
-  (REST createItem keeps `jobApprovers`; one ACTIVATED record by `(uncontrolled)`; internal references in mails), `b11`,
-  `b14` (folder rename records; Changes and Incidents paging and month links), `sa-read` (icons, Back links, 800 px).
-- `verify/`: `c1` (a job display name with markup shows as text), `c4`, `c11` (the strategy monitor's redirects stay
-  inside Jenkins), `c31` (a refusal names the status), `d`, `d10` (an activated job survives Disable and Enable), `f1`,
-  `f2`, `v2`, `v2b` (Pipeline `replay/rebuild` refused and recorded), `f3` (with change control off a `config.xml`
-  authorization entry is kept), `role-r3` (the monitor names an item-role Create holder; it applies
-  `casc/profile-role-r3.yaml`), `v5` (Cancel on the Request Run form), `v6` (the folder page shows a name-restricted
-  CREATE window), `v7` (no Back link on detail pages; internal references in mails).
 
 ## Faked clock (`faketime/`)
 

@@ -1,5 +1,0 @@
-<?xml version='1.1' encoding='UTF-8'?><project><description>B14: fails until /tmp/b14-aud-ok exists</description><properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions><hudson.model.PasswordParameterDefinition><name>PW</name><defaultValue>pw-e2e-4711</defaultValue></hudson.model.PasswordParameterDefinition></parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties><builders><hudson.tasks.Shell><command>set +x
-echo "token=$PW"
-echo "other secret: hunter2-unmasked"
-for i in $(seq 1 120); do echo "line $i"; done
-[ -f /tmp/b14-aud-ok ]</command></hudson.tasks.Shell></builders></project>

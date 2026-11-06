@@ -2,8 +2,6 @@
 .env
 # Transient output of the scripts and drivers (evidence logs, CSV/JSON dumps).
 out/
-legacy/browser/node_modules
-legacy/fresh/node_modules
 legacy/extra/node_modules
 
 # Screenshots are kept on disk and never committed (owner decision 2026-09-30);

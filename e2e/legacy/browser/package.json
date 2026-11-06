@@ -1,9 +1,0 @@
-{
-  "name": "batch-control-e2e-browser",
-  "private": true,
-  "description": "Playwright driver for the batch-control e2e checklist (run-3)",
-  "type": "module",
-  "dependencies": {
-    "playwright": "1.58.2"
-  }
-}
