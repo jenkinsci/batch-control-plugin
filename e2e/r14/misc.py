@@ -174,12 +174,16 @@ def sec_H():
         s.shot("#main-panel", f"H-{role}-history")
         s.done()
         emit("H", row)
-    # Changes and incidents month navigation
+    # Changes and incidents month navigation; #31 (the retired B/b11 #9, B/b14 #16, A/b11 #13, A/b14 #17): judged by
+    # ci/h1_rules.py "month-nav" (the "«" link, the empty month's sentence, Older on Changes)
     s = Session("approver-1")
+    nav_rows = []
     for page in ["/batch-control/changes/", "/batch-control/incidents/"]:
-        s.go(page)
-        row = {"page": page, "rows": s.page.locator("#main-panel table tbody tr").count(),
+        t0 = time.time()
+        r = s.go(page)
+        row = {"page": page, "status": r.status if r else None, "rows": s.page.locator("#main-panel table tbody tr").count(),
                "buttons": [(a.inner_text().strip(), a.get_attribute("href")) for a in s.page.locator("#main-panel a.jenkins-button, #main-panel form button").all()]}
+        row.update(_month_view(s))
         sh = s.page.locator("#main-panel form button, #main-panel form input[type=submit]", has_text=re.compile("Show"))
         if sh.count():
             sel = s.page.locator("#main-panel form select, #main-panel form input[name=month]").first
@@ -187,13 +191,53 @@ def sec_H():
             with s.page.expect_navigation():
                 sh.first.click()
             row["show_landing"] = s.page.url.replace(BASE, "")
+        if page == "/batch-control/changes/":
+            row["paging"] = _month_paging(s, page)
+        s.go(page)
         prev = s.page.locator("#main-panel a", has_text="«")
         if prev.count():
+            row["prev_href"] = prev.first.get_attribute("href")
             prev.first.click(); s.page.wait_for_load_state("load")
             row["prev_month"] = (s.page.url.replace(BASE, ""), s.page.locator("#main-panel table tbody tr").count(),
                                  re.sub(r"\s+", " ", s.page.locator("#main-panel").inner_text())[:200])
+            row["prev"] = dict(_month_view(s), url=s.page.url.replace(BASE, ""))
+        # a month that certainly holds no record, whatever the stack has seen: ten years before the shown one
+        empty = f"{int((row.get('month') or '2026-01')[:4]) - 10}-01"
+        r = s.go(f"{page}?month={empty}")
+        row["empty_month"] = dict(_month_view(s), url=s.page.url.replace(BASE, ""), asked=empty, status=r.status if r else None)
+        row["seconds"] = round(time.time() - t0, 1)
         emit("H", row)
+        nav_rows.append(row)
     s.done()
+    lib.h1.report("month-nav", nav_rows)
+
+
+def _month_view(s):
+    """The month a Changes/Incidents page shows (its month input), its rows, its page footer and its empty-month
+    sentence (the paragraph "No change records in <m>." / "No incidents in <m>.", None when absent)."""
+    m = s.page.locator("#main-panel form input[name=month]")
+    foot = s.page.locator("#main-panel [role=navigation][aria-label^='Pages of'] span")
+    empty = s.page.locator("#main-panel p", has_text=re.compile(r"^\s*No (change records|incidents) in "))
+    return {"month": m.first.input_value() if m.count() else None, "rows": s.page.locator("#main-panel table tbody tr").count(),
+            "footer": re.sub(r"\s+", " ", foot.first.inner_text()).strip() if foot.count() else None,
+            "empty": re.sub(r"\s+", " ", empty.first.inner_text()).strip() if empty.count() else None}
+
+
+def _month_paging(s, page):
+    """Older on the shown month of Changes (the CI stack writes far more than 50 change records in its month): its
+    link, and page 2 as it opens (rows, footer, first row against page 1's, the Newer link)."""
+    s.go(page)
+    first = s.page.locator("#main-panel table tbody tr").first
+    out = {"first_row": re.sub(r"\s+", " ", first.inner_text())[:80] if first.count() else None}
+    older = s.page.locator("#main-panel [role=navigation] a", has_text=re.compile(r"^\s*Older\s*$"))
+    out["older_href"] = older.first.get_attribute("href") if older.count() else None
+    if older.count():
+        older.first.click(); s.page.wait_for_load_state("load")
+        first2 = s.page.locator("#main-panel table tbody tr").first
+        out["page2"] = dict(_month_view(s), url=s.page.url.replace(BASE, ""),
+                            first_row=re.sub(r"\s+", " ", first2.inner_text())[:80] if first2.count() else None,
+                            newer=s.page.locator("#main-panel [role=navigation] a", has_text=re.compile(r"^\s*Newer\s*$")).count())
+    return out
 
 
 # ---------------------------------------------------------------- P

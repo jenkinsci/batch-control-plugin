@@ -632,6 +632,122 @@ INCIDENT_M4_BREAKS = [  # (what broke, the fields a run would record then)
 ]
 
 
+# ---- #31 legacy gaps: rows as a green run on the CI stack records them (2026-11-06)
+CH, IN = "/batch-control/changes/", "/batch-control/incidents/"
+
+
+def _set(row, path, value):
+    """Set a nested key ("prev.month") of a fixture row; value None removes it."""
+    *outer, last = path.split(".")
+    d = row
+    for k in outer:
+        d = d[k]
+    if value is None:
+        d.pop(last, None)
+    else:
+        d[last] = value
+
+
+def _month_row(page, month="2026-11", prev="2026-10", total=173, change=None):
+    """misc.py H's month-nav row of one page; `change` sets nested keys ("prev.rows": 3)."""
+    sentence = h1.MONTH_NAV_PAGES[page][0]
+    changes = page == CH
+    r = {"page": page, "status": 200, "rows": 50 if changes else 2, "month": month, "empty": None,
+         "footer": f"Page 1 ({total} records in {month})" if changes else f"Page 1 (2 incidents in {month})",
+         "prev_href": f"?month={prev}",
+         "prev": {"month": prev, "rows": 0, "footer": None, "empty": sentence.format(m=prev), "url": f"{page}?month={prev}"},
+         "empty_month": {"month": "2016-01", "rows": 0, "footer": None, "empty": sentence.format(m="2016-01"),
+                         "url": f"{page}?month=2016-01", "asked": "2016-01", "status": 200}, "seconds": 0.5}
+    if changes:
+        r["paging"] = {"first_row": "CONFIG_CHANGE batch-control-configuration manager", "older_href": f"?month={month}&page=2",
+                       "page2": {"month": month, "rows": min(50, total - 50), "footer": f"Page 2 ({total} records in {month})",
+                                 "empty": None, "url": f"{page}?month={month}&page=2", "first_row": "CONFIGURE ops/cron-a admin",
+                                 "newer": 1}}
+    for k, v in (change or {}).items():
+        _set(r, k, v)
+    return r
+
+
+def _month_rows(changes=None, incidents=None, drop=None, **kw):
+    rows = {CH: _month_row(CH, change=changes, **kw), IN: _month_row(IN, change=incidents, **kw)}
+    rows.pop(drop, None)
+    return list(rows.values())
+
+
+def _detail(kind, width, change=None):
+    """round3.py C's detail-narrow row (approver-1, a pending run request or grant request)."""
+    main_left = 96 if width == 1280 else 0
+    r = {"user": "approver-1", "kind": kind, "width": width, "status": 200, "scrollW": width, "clientW": width,
+         "main": {"left": main_left, "right": width - main_left, "width": width - 2 * main_left},
+         "table": {"left": main_left + 20 + (6 if width == 1280 else 0), "right": width - main_left - 20 - (6 if width == 1280 else 0),
+                   "width": width - 2 * main_left - 40 - (12 if width == 1280 else 0), "cls": "jenkins-table jenkins-table--small",
+                   "scrollW": width - 2 * main_left - 45 - (12 if width == 1280 else 0),
+                   "clientW": width - 2 * main_left - 40 - (12 if width == 1280 else 0), "rows": 7 if kind == "requests" else 9,
+                   "heads": ["Job", "Status", "Requester"] if kind == "requests" else ["Scope", "Actions", "Duration"]}}
+    for k, v in (change or {}).items():
+        _set(r, k, v)
+    return r
+
+
+def _detail_rows(drop=None, **changes):
+    """Both pages at both widths; `changes` by "<kind>_<width>", `drop` a (kind, width) left out."""
+    return [_detail(k, w, changes.get(f"{k}_{w}")) for k, _ in h1.DETAIL_NARROW_PAGES for w in h1.DETAIL_NARROW_WIDTHS
+            if (k, w) != drop]
+
+
+def _rdc(ui, **change):
+    """round3.py H's request-dialog-cancel row of one dialog."""
+    user, job = {"new": ("requester", "batch-daily"), "classic": ("classic", "batch-pipeline")}[ui]
+    rid = "e504daea-86e0-4af8-b325-187b1e5880ac" if ui == "new" else "84553327-8256-4b63-9e18-0d129e823ab3"
+    r = {"ui": ui, "user": user, "job": job, "reason": f"e2e-31 {ui} request dialog cancel 1793912034697", "stored_before": [],
+         "cancel_buttons": 1, "closed": True, "url_unchanged": True, "posts_on_cancel": [], "stored_after_cancel": [],
+         "landing": f"/batch-control/requests/{rid}/", "stored_after_submit": [f"{rid} PENDING"], "seconds": 1.6}
+    r.update(change)
+    return r
+
+
+def _rdc_rows(new=None, classic=None, drop=None):
+    return [_rdc(ui, **(c or {})) for ui, c in (("new", new), ("classic", classic)) if ui != drop]
+
+
+PERM_CORE = ["hudson.model.Hudson.Administer", "hudson.model.Hudson.Read", h1.CORE_ITEM_READ, "hudson.model.Item.Build"]
+
+
+def _perms(**change):
+    """manage_roles.py's third part (judge_role "manage_perms") as a green run logs it."""
+    res = {"global dialog": "Add global role", "global offered": sorted(PERM_CORE + list(h1.BC_PERMS)), "global closed": True,
+           "item dialog": "Add item role", "item offered": sorted([h1.CORE_ITEM_READ, "hudson.model.Item.Build", h1.BC_PERM + "Request"]),
+           "ticked": ["hudson.model.Item.Discover", h1.CORE_ITEM_READ, h1.BC_PERM + "Request"], "item closed": True,
+           "listed after reload": 1, "server role": f"{h1.RS_PERMS_PATTERN} [{h1.CORE_ITEM_READ}, {h1.BC_PERM}Request]",
+           "strategy": h1.RS_STRATEGY, "console": [], "bad": [], "remove": 200, "server role after remove": "none",
+           "requests": ["200 GET /manage/role-strategy/manage-roles", "200 POST /role-strategy/strategy/addRole"], "seconds": 2.8}
+    res.update(change)
+    return res
+
+
+DEPLOY_V = "999999-SNAPSHOT (private-fc8b7263-yongjunhong)"
+
+
+def _deploy(**change):
+    """h3/deploy.py's row as a green run records it (2026-11-06: 33 s)."""
+    after = {"batch-control": {"version": DEPLOY_V, "active": True, "enabled": True},
+             "caffeine-api": {"version": "3.3.1-214.v18eb_56b_34920", "active": True, "enabled": True},
+             "cloudbees-folder": {"version": "6.1107.v31f8955765c8", "active": True, "enabled": True},
+             "commons-lang3-api": {"version": "3.21.0-122.v6a_ea_4fd34049", "active": True, "enabled": True},
+             "ionicons-api": {"version": "94.vcc3065403257", "active": True, "enabled": True}}
+    r = {"hpi": "target/batch-control.hpi", "hpi_version": DEPLOY_V, "boot_seconds": 2, "core": "2.568.3", "before": {},
+         "before_page": 404, "update_center": {"status": 302, "plugins": "2129", "attempts": 1},
+         "upload": {"status": 302, "location": "/pluginManager/updates/"},
+         "jobs": [{"name": n, "status": "Success", "error": ""} for n in
+                  ("commons-lang3-api", "ionicons-api", "cloudbees-folder", "caffeine-api", "batch-control")],
+         "after": after, "failed": "[]", "after_page": 200, "seconds": 33}
+    for k, v in change.items():
+        _set(r, k.replace("__", "."), v)
+    return r
+
+
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -1179,6 +1295,141 @@ def synthetic():
          [{"kind": "entry", "role": "requester", "ui": "new", "page": "/job/batch-daily/", "where": "main", "label": "Build Now",
            "result": "notified", "notifications": ["Build scheduled"], "console": []}],
          {"ui": "new", "roles": ["requester"], "prefix": PREFIX}, "fail", "notified"),
+        # #31 X-23 (misc.py H "month-nav"): Changes and Incidents month navigation, Changes paging
+        ("month-nav: #31 « to an empty October, an empty month long ago, Changes Older and Newer", "month-nav", _month_rows(),
+         None, "pass", None),
+        ("month-nav: #31 the previous month has records (no empty sentence)", "month-nav",
+         _month_rows(changes={"prev.rows": 12, "prev.empty": None}, incidents={"prev.rows": 1, "prev.empty": None}), None, "pass", None),
+        ("month-nav: #31 « from January goes to December of the year before", "month-nav", _month_rows(month="2027-01", prev="2026-12"),
+         None, "pass", None),
+        ("month-nav: #31 « on Changes skips a month", "month-nav",
+         _month_rows(changes={"prev_href": "?month=2026-09", "prev.url": CH + "?month=2026-09", "prev.month": "2026-09",
+                              "prev.empty": "No change records in 2026-09."}), None, "fail", "month-nav-prev"),
+        ("month-nav: #31 « on Incidents lands on the shown month again", "month-nav",
+         _month_rows(incidents={"prev.url": IN + "?month=2026-10", "prev.month": "2026-11", "prev.empty": "No incidents in 2026-11."}),
+         None, "fail", "month-nav-prev"),
+        ("month-nav: #31 an empty previous month without the empty sentence", "month-nav", _month_rows(incidents={"prev.empty": None}),
+         None, "fail", "month-nav-prev"),
+        ("month-nav: #31 the previous month lists records and still says it has none", "month-nav",
+         _month_rows(changes={"prev.rows": 3}), None, "fail", "month-nav-prev"),
+        ("month-nav: #31 Incidents' empty month says another sentence", "month-nav",
+         _month_rows(incidents={"empty_month.empty": "No incident records in 2016-01."}), None, "fail", "month-nav-empty"),
+        ("month-nav: #31 an empty month shows the current month instead of the asked one", "month-nav",
+         _month_rows(changes={"empty_month.month": "2026-11", "empty_month.rows": 50, "empty_month.empty": None}), None, "fail",
+         "month-nav-empty"),
+        ("month-nav: #31 an empty month with a footer counting nothing", "month-nav",
+         _month_rows(incidents={"empty_month.footer": "Page 1 (0 incidents in 2016-01)"}), None, "fail", "month-nav-empty"),
+        ("month-nav: #31 Changes page 1 of 173 records without Older", "month-nav", _month_rows(changes={"paging.older_href": None}),
+         None, "fail", "month-nav-paging"),
+        ("month-nav: #31 page 2 repeats page 1", "month-nav",
+         _month_rows(changes={"paging.page2.first_row": "CONFIG_CHANGE batch-control-configuration manager"}), None, "fail",
+         "month-nav-paging"),
+        ("month-nav: #31 page 2's footer says page 1", "month-nav",
+         _month_rows(changes={"paging.page2.footer": "Page 1 (173 records in 2026-11)"}), None, "fail", "month-nav-paging"),
+        ("month-nav: #31 page 2 without Newer", "month-nav", _month_rows(changes={"paging.page2.newer": 0}), None, "fail",
+         "month-nav-paging"),
+        ("month-nav: #31 page 1 lists 49 of 173", "month-nav", _month_rows(changes={"rows": 49}), None, "fail", "month-nav-paging"),
+        ("month-nav: #31 the shown month of Changes holds 40 records (no Older to judge)", "month-nav",
+         _month_rows(changes={"rows": 40, "footer": "Page 1 (40 records in 2026-11)", "paging": None}), None, "fail",
+         "month-nav-measured"),
+        ("month-nav: #31 the Incidents row missing", "month-nav", _month_rows(drop=IN), None, "fail", "month-nav-measured"),
+        ("month-nav: #31 « not followed", "month-nav", _month_rows(changes={"prev": None}), None, "fail", "month-nav-measured"),
+        ("month-nav: #31 no row at all", "month-nav", [], None, "fail", "month-nav-measured"),
+        # #31 X-25 (round3.py C "detail-narrow"): run and grant request pages at 1280 and 800 px
+        ("detail-narrow: #31 both pages at both widths fit, compact summary", "detail-narrow", _detail_rows(), None, "pass", None),
+        ("detail-narrow: #31 a vertical scroll bar and one pixel of rounding", "detail-narrow",
+         _detail_rows(grants_800={"clientW": 785, "scrollW": 786, "table.right": 766}), None, "pass", None),
+        ("detail-narrow: #31 the grant page scrolls sideways at 800 px", "detail-narrow",
+         _detail_rows(grants_800={"scrollW": 1012, "table.right": 992, "table.width": 972}), None, "fail", "detail-narrow-scroll"),
+        ("detail-narrow: #31 the summary table overflows inside its own box", "detail-narrow",
+         _detail_rows(requests_800={"table.scrollW": 905}), None, "fail", "detail-narrow-scroll"),
+        ("detail-narrow: #31 the run request's summary table is not compact", "detail-narrow",
+         _detail_rows(requests_1280={"table.cls": "jenkins-table"}), None, "fail", "detail-narrow-compact"),
+        ("detail-narrow: #31 the grant page at 800 px not measured", "detail-narrow", _detail_rows(drop=("grants", 800)), None, "fail",
+         "detail-narrow-measured"),
+        ("detail-narrow: #31 the viewport was not narrowed", "detail-narrow",
+         _detail_rows(requests_800={"clientW": 1280, "scrollW": 1280}), None, "fail", "detail-narrow-measured"),
+        ("detail-narrow: #31 the page answered 403", "detail-narrow", _detail_rows(grants_1280={"status": 403}), None, "fail",
+         "detail-narrow-measured"),
+        ("detail-narrow: #31 no summary table found", "detail-narrow", _detail_rows(requests_1280={"table": None}), None, "fail",
+         "detail-narrow-measured"),
+        # #31 X-48 (round3.py H "request-dialog-cancel"): the Request Run dialog's Cancel
+        ("request-dialog-cancel: #31 Cancel closes and stores nothing, Submit stores one", "request-dialog-cancel", _rdc_rows(), None,
+         "pass", None),
+        ("request-dialog-cancel: #31 Cancel does not close the dialog", "request-dialog-cancel", _rdc_rows(new={"closed": False}),
+         None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel does not close and the reopen then times out (the red run of 2026-11-06)",
+         "request-dialog-cancel",
+         _rdc_rows(new={"closed": False, "error": "TimeoutError('Locator.click: Timeout 20000ms exceeded.')", "landing": None,
+                        "stored_after_submit": None}), None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel submits the request", "request-dialog-cancel",
+         _rdc_rows(classic={"stored_after_cancel": ["84553327-8256-4b63-9e18-0d129e823ab3 PENDING"],
+                            "posts_on_cancel": ["POST /batch-control/requests/submit"], "url_unchanged": False}), None, "fail",
+         "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Cancel posts to Batch Control", "request-dialog-cancel",
+         _rdc_rows(new={"posts_on_cancel": ["POST /job/batch-daily/batch-control/submit"]}), None, "fail", "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 two Cancel buttons", "request-dialog-cancel", _rdc_rows(new={"cancel_buttons": 2}), None, "fail",
+         "request-dialog-cancel"),
+        ("request-dialog-cancel: #31 Submit stores nothing (a dialog that cannot submit)", "request-dialog-cancel",
+         _rdc_rows(new={"landing": "/job/batch-daily/", "stored_after_submit": []}), None, "fail", "request-dialog-cancel-guard"),
+        ("request-dialog-cancel: #31 Submit stores two requests", "request-dialog-cancel",
+         _rdc_rows(classic={"stored_after_submit": ["84553327-8256-4b63-9e18-0d129e823ab3 PENDING", "0d0b2c51-0c32-4b77-a9f5-6c5f4d1c1a11 PENDING"]}),
+         None, "fail", "request-dialog-cancel-guard"),
+        ("request-dialog-cancel: #31 a request with the reason was there before", "request-dialog-cancel",
+         _rdc_rows(new={"stored_before": ["0d0b2c51-0c32-4b77-a9f5-6c5f4d1c1a11 PENDING"]}), None, "fail",
+         "request-dialog-cancel-measured"),
+        ("request-dialog-cancel: #31 the classic dialog not measured", "request-dialog-cancel", _rdc_rows(drop="classic"), None,
+         "fail", "request-dialog-cancel-measured"),
+        ("request-dialog-cancel: #31 the driver raised", "request-dialog-cancel",
+         _rdc_rows(new={"error": "TimeoutError: Request Run not found", "stored_after_cancel": None}), None, "fail",
+         "request-dialog-cancel-measured"),
+        # #31 X-24 (role/manage_roles.py "manage_perms"): the five permissions in Add Role, Request saved on an item role
+        ("role: #31 Add Role offers the five permissions, the item role keeps Request", "role/manage_perms", [_perms()], None, "pass",
+         None),
+        ("role: #31 Global roles' Add Role lacks ViewHistory", "role/manage_perms",
+         [_perms(**{"global offered": sorted(PERM_CORE + [p for p in h1.BC_PERMS if not p.endswith("ViewHistory")])})], None, "fail",
+         "role-bc-perms"),
+        ("role: #31 Item roles' Add Role lacks Request", "role/manage_perms",
+         [_perms(**{"item offered": [h1.CORE_ITEM_READ, "hudson.model.Item.Build"]})], None, "fail", "role-bc-perms"),
+        ("role: #31 the saved item role lost Request", "role/manage_perms",
+         [_perms(**{"server role": f"{h1.RS_PERMS_PATTERN} [{h1.CORE_ITEM_READ}]"})], None, "fail", "role-bc-save"),
+        ("role: #31 the item role not listed after a reload", "role/manage_perms", [_perms(**{"listed after reload": 0})], None, "fail",
+         "role-bc-save"),
+        ("role: #31 the dialog stays open after Add", "role/manage_perms", [_perms(**{"item closed": False})], None, "fail",
+         "role-bc-save"),
+        ("role: #31 the permission reader sees no core permission", "role/manage_perms",
+         [_perms(**{"global offered": [], "item offered": []})], None, "fail", "role-bc-perms-measured"),
+        ("role: #31 the role not removed again", "role/manage_perms", [_perms(**{"server role after remove": "e2e31-none/.* [x]"})],
+         None, "fail", "role-bc-perms-measured"),
+        ("role: #31 addRole answered 500", "role/manage_perms",
+         [_perms(requests=["200 GET /manage/role-strategy/manage-roles", "500 POST /role-strategy/strategy/addRole"])], None, "fail",
+         "role-bc-perms-measured"),
+        # #31 X-26 (h3/deploy.py "deploy"): Deploy Plugin of the built .hpi on a clean controller
+        ("deploy: #31 the build and its four plugins installed, active after the restart", "deploy", [_deploy()], None, "pass", None),
+        ("deploy: #31 an older core sends the upload to /updateCenter/", "deploy", [_deploy(upload__location="/updateCenter/")], None,
+         "pass", None),
+        ("deploy: #31 batch-control already installed before the upload", "deploy",
+         [_deploy(before={"batch-control": {"version": DEPLOY_V, "active": True, "enabled": True}})], None, "fail", "deploy-clean-before"),
+        ("deploy: #31 /batch-control/ answered before the upload", "deploy", [_deploy(before_page=200)], None, "fail",
+         "deploy-clean-before"),
+        ("deploy: #31 a required plugin missing in the manifest's resolution (caffeine-api 99.0)", "deploy",
+         [_deploy(after={k: v for k, v in _deploy()["after"].items() if k not in ("batch-control", "caffeine-api")},
+                  jobs=[{"name": "batch-control", "status": "Failure", "error": "Failed to dynamically deploy this plugin"}],
+                  failed='["batch-control: Plugin is missing: caffeine-api (99.0)"]', after_page=404)], None, "fail", "deploy-installed"),
+        ("deploy: #31 the update center's release installed instead of the build", "deploy",
+         [_deploy(**{"after__batch-control__version": "1.4.0"})], None, "fail", "deploy-installed"),
+        ("deploy: #31 batch-control installed but disabled", "deploy", [_deploy(**{"after__batch-control__active": False})], None,
+         "fail", "deploy-installed"),
+        ("deploy: #31 ionicons-api not active", "deploy", [_deploy(**{"after__ionicons-api__active": False})], None, "fail",
+         "deploy-installed"),
+        ("deploy: #31 a plugin failed to load", "deploy", [_deploy(failed='["mailer: x"]')], None, "fail", "deploy-installed"),
+        ("deploy: #31 the update center not reachable", "deploy",
+         [_deploy(update_center={"status": 302, "plugins": "none", "attempts": 4})], None, "fail", "deploy-measured"),
+        ("deploy: #31 the upload refused", "deploy", [_deploy(upload={"status": 403, "location": ""}, jobs=[])], None, "fail",
+         "deploy-measured"),
+        ("deploy: #31 the controller did not start", "deploy", [{"error": "RuntimeError('the clean controller did not answer')"}], None,
+         "fail", "deploy-measured"),
+        ("deploy: #31 no row", "deploy", [], None, "fail", "deploy-measured"),
     ]
 
 

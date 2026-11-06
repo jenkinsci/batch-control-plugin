@@ -933,6 +933,15 @@ RS_EDIT = {"role": "e2e31-prod", "old": "prod/.*", "new": "prod(/.*)?", "perms":
 RS_MATCH_CAP = 15  # role-strategy 927's manage-roles bundle: getMatchingJobs?maxJobs=15
 
 
+# #31 (B/b8-role.mjs #1): the Batch Control permissions role-strategy's Add Role dialogs must offer (SPEC 2: "Matrix and
+# Role based strategies expose them"; D-38a: Request is assignable per item), and the item role manage_roles.py saves
+BC_PERM = "io.jenkins.plugins.batchcontrol.security.BatchControlPermissions."
+BC_PERMS = tuple(BC_PERM + p for p in ("Manage", "Request", "Approve", "RequestGrant", "ViewHistory"))
+CORE_ITEM_READ = "hudson.model.Item.Read"
+RS_PERMS_ROLE, RS_PERMS_PATTERN = "e2e31-bcreq", "e2e31-none/.*"
+RS_PERMS_SAVED = (CORE_ITEM_READ, BC_PERM + "Request")
+
+
 def judge_role(name, res, ctx=None):
     """res: the one dict the role script logs. Tables from e2e-13/14 RS (SPEC D-35f/D-35g, D-35a)."""
     # the script passes its dict as built (tuples); the log and the tables hold JSON (lists): compare JSON with JSON
@@ -975,6 +984,8 @@ def judge_role(name, res, ctx=None):
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
     elif name == "manage_edit":
         manage_edit(j, res, bad_req)
+    elif name == "manage_perms":
+        manage_perms(j, res, bad_req)
     elif name == "endpoints":
         rs6 = res.get("RS-6 admin forwarded == role-strategy") or {}
         bad6 = {k: v[:2] for k, v in rs6.items() if v[0] != 200 or v[1] is not True}
@@ -1056,6 +1067,37 @@ def manage_edit(j, res, bad_req):
         j.fail("role-edit-requests", {"bad requests": bad_req(), "bad": res.get("bad"), "template bad": res.get("template bad")})
     j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
     j.console("console", res.get("template console"), {"role": "admin", "page": "/manage/role-strategy/permission-templates"})
+
+
+def manage_perms(j, res, bad_req):
+    """#31 (the retired B/b8-role.mjs #1; SPEC 2: the five permissions are exposed to the Role based strategy, D-38a:
+    Request also per item), manage_roles.py's third part as admin under the Batch Control role strategy:
+      * role-bc-perms: the Add Role dialog of Global roles offers all five Batch Control permissions (BC_PERMS), and the
+        one of Item roles offers BatchControl/Request;
+      * role-bc-save: the item role RS_PERMS_ROLE (pattern RS_PERMS_PATTERN) saved through that dialog with
+        BatchControl/Request and Job/Read ticked closes the dialog, is listed after a reload and holds exactly those
+        two permissions on the server, the strategy still RS_STRATEGY;
+      * role-bc-perms-measured: both dialogs opened and their permissions were read, core's Job/Read offered in each
+        read (the reader works), the role removed again afterwards, nothing raised, no role-strategy request answered
+        >= 400 and no unexplained console error."""
+    glob, item = res.get("global offered"), res.get("item offered")
+    measured = isinstance(glob, list) and isinstance(item, list) and CORE_ITEM_READ in glob and CORE_ITEM_READ in item
+    if (not measured or not res.get("global dialog") or not res.get("item dialog") or res.get("error")
+            or res.get("server role after remove") != "none" or bad_req() or res.get("bad")):
+        j.fail("role-bc-perms-measured", {k: res.get(k) for k in ("global dialog", "item dialog", "error", "remove",
+                                                                  "server role after remove", "bad")}
+               | {"core read offered": [CORE_ITEM_READ in (glob or []), CORE_ITEM_READ in (item or [])], "bad requests": bad_req()})
+    if measured:
+        missing = [p.rsplit(".", 1)[1] for p in BC_PERMS if p not in glob]
+        if missing or BC_PERM + "Request" not in item:
+            j.fail("role-bc-perms", {"global missing": missing, "item offers Request": BC_PERM + "Request" in item},
+                   {"global": [p for p in glob if p.startswith(BC_PERM)], "item": [p for p in item if p.startswith(BC_PERM)]})
+    want = f"{RS_PERMS_PATTERN} [{', '.join(sorted(RS_PERMS_SAVED))}]"
+    if not (res.get("item closed") is True and res.get("listed after reload") == 1 and res.get("server role") == want
+            and res.get("strategy") == RS_STRATEGY):
+        j.fail("role-bc-save", {k: res.get(k) for k in ("ticked", "item closed", "listed after reload", "server role", "strategy")}
+               | {"expected": want})
+    j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
 
 
 # ------------------------------------------------------------------ r15
@@ -1396,6 +1438,97 @@ def judge_tab_bar_narrow(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/round3.py C (#31, B/section-a #27, A/sa-read #14)
+# The request pages round3.py C reads at narrow widths: (path below /batch-control/, the seed's id in r14/out/ids.json),
+# as their approver, approver-1 (the legacy A-17 user: the Decision section is on the page).
+DETAIL_NARROW_USER = "approver-1"
+DETAIL_NARROW_PAGES = (("requests", "req_pending"), ("grants", "g_pending_job"))
+DETAIL_NARROW_WIDTHS = (1280, 800)
+COMPACT_TABLE = "jenkins-table--small"
+
+
+def judge_detail_narrow(rows, ctx=None):
+    """#31 (the retired B/section-a.mjs #27 and B/audit/sa-read.mjs #14, A-17; e2e-03 G-37 "at 800 px the run and grant
+    request detail pages do not scroll sideways (compact summary)"): round3.py C opens a pending run request's and a
+    pending grant request's page as DETAIL_NARROW_USER at each DETAIL_NARROW_WIDTHS width:
+      * detail-narrow-scroll: the document's scroll width is at most its client width (+ NARROW_TOLERANCE_PX), and the
+        summary table has no hidden overflow of its own and ends inside the viewport;
+      * detail-narrow-compact: the summary table (the main panel's first table) is core's compact table, class
+        jenkins-table--small;
+      * detail-narrow-measured: a row for each page and width that answered 200 in a viewport of that width, with the
+        summary table found (its row headers read)."""
+    j = Judge("detail-narrow", ctx)
+    tol = NARROW_TOLERANCE_PX
+    seen = {(r.get("kind"), r.get("width")): r for r in rows}
+    for kind, _ in DETAIL_NARROW_PAGES:
+        for width in DETAIL_NARROW_WIDTHS:
+            r = seen.get((kind, width))
+            key = {"kind": kind, "width": width}
+            if r is None:
+                j.fail("detail-narrow-measured", dict(key, row="missing"))
+                continue
+            t = r.get("table")
+            # the client width is the viewport less a vertical scroll bar, if any
+            if (r.get("status") != 200 or not isinstance(t, dict) or not t.get("rows") or not t.get("heads")
+                    or not (width - 20 <= (r.get("clientW") or 0) <= width)):
+                j.fail("detail-narrow-measured", dict(key, status=r.get("status"), table=None if t is None else t.get("rows"),
+                                                      clientW=r.get("clientW")), {"error": r.get("error")})
+                continue
+            cw = r.get("clientW") or 0
+            if ((r.get("scrollW") or 0) > cw + tol or (t.get("scrollW") or 0) > (t.get("clientW") or 0) + tol
+                    or (t.get("right") or 0) > cw + tol):
+                j.fail("detail-narrow-scroll", dict(key, scrollW=r.get("scrollW"), clientW=cw),
+                       {"table": {k: t.get(k) for k in ("left", "right", "width", "scrollW", "clientW")}, "main": r.get("main")})
+            if COMPACT_TABLE not in (t.get("cls") or "").split():
+                j.fail("detail-narrow-compact", dict(key, cls=t.get("cls")))
+    return j
+
+
+# ------------------------------------------------------------------ r14/round3.py H (#31, A/b4 #4, V/v5 #4)
+# The Request Run dialogs round3.py H opens: (ui, user, job) of the new job page's app bar entry and the classic side
+# panel's entry.
+REQUEST_DIALOG_CANCEL = (("new", "requester", "batch-daily"), ("classic", "classic", "batch-pipeline"))
+
+
+def judge_request_dialog_cancel(rows, ctx=None):
+    """#31 (the retired B/audit/b4.mjs #4 and B/verify/v5.mjs #4; e2e-03 G-36 "Cancel on the Request Run form stores
+    nothing", the dialog half; the page form's Cancel is a link to the job, a JenkinsRule row): round3.py H opens the
+    Request Run dialog on each REQUEST_DIALOG_CANCEL job page, fills a reason unique to the run and ticks approver-1:
+      * request-dialog-cancel: the dialog has exactly one Cancel button; it closes the dialog without leaving the job
+        page, posts nothing to Batch Control and no request with that reason is in the store;
+      * request-dialog-cancel-guard: the same dialog, filled the same way and submitted, lands on the new request's page
+        and the store holds exactly one PENDING request with that reason (a Cancel that only fails to submit because the
+        dialog cannot submit at all would otherwise pass);
+      * request-dialog-cancel-measured: a row for each dialog, with no driver error, no request with the reason before
+        the dialog opened, and every step read."""
+    j = Judge("request-dialog-cancel", ctx)
+    by_ui = {r.get("ui"): r for r in rows}
+    for ui, user, job in REQUEST_DIALOG_CANCEL:
+        r = by_ui.get(ui)
+        key = {"ui": ui, "user": user, "job": job}
+        if r is None:
+            j.fail("request-dialog-cancel-measured", dict(key, row="missing"))
+            continue
+        # the Cancel half is judged whenever it was measured, also when a later step raised
+        cancel_measured = (r.get("user") == user and r.get("job") == job and r.get("stored_before") == []
+                           and isinstance(r.get("closed"), bool) and isinstance(r.get("stored_after_cancel"), list))
+        guard_measured = cancel_measured and isinstance(r.get("stored_after_submit"), list)
+        if r.get("error") or not guard_measured:
+            j.fail("request-dialog-cancel-measured", dict(key, problem="not measured"),
+                   {k: r.get(k) for k in ("error", "user", "job", "stored_before", "closed", "stored_after_cancel",
+                                          "stored_after_submit")})
+        if cancel_measured and not (r.get("cancel_buttons") == 1 and r.get("closed") is True and r.get("url_unchanged") is True
+                                    and r.get("posts_on_cancel") == [] and r.get("stored_after_cancel") == []):
+            j.fail("request-dialog-cancel", key, {k: r.get(k) for k in ("cancel_buttons", "closed", "url_unchanged",
+                                                                        "posts_on_cancel", "stored_after_cancel")})
+        stored = r.get("stored_after_submit") or []
+        if guard_measured and not (DETAIL.fullmatch(r.get("landing") or "") and "/batch-control/requests/" in r.get("landing")
+                                   and len(stored) == 1 and stored[0].endswith(" PENDING")
+                                   and stored[0].split()[0] in r.get("landing")):
+            j.fail("request-dialog-cancel-guard", key, {"landing": r.get("landing"), "stored": stored})
+    return j
+
+
 # ------------------------------------------------------------------ r14/round3.py F (#31, r9/s89.py #4, r10/s89.py)
 # The users whose grants page must show all three lists (the seed gives requester, and so admin, pending requests,
 # active windows and ended ones); round3.py F measures every user it visits.
@@ -1536,6 +1669,135 @@ def judge_dark(rows, ctx=None):
     return j
 
 
+# ------------------------------------------------------------------ r14/misc.py H (#31, B/b11 #9, B/b14 #16, A/b11 #13, A/b14 #17)
+# The month pages misc.py H walks, with the sentence each shows for a month without records (ChangesSection and
+# IncidentsSection index.jelly) and the noun of its page footer ("Page 1 (198 records in 2026-11)").
+MONTH_NAV_PAGES = {"/batch-control/changes/": ("No change records in {m}.", "records?"),
+                   "/batch-control/incidents/": ("No incidents in {m}.", "incidents?")}
+MONTH_PAGE_SIZE = 50  # Paging.PAGE_SIZE
+MONTH_RX = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+
+
+def _prev_month(m):
+    y, mo = int(m[:4]), int(m[5:7])
+    return f"{y - 1}-12" if mo == 1 else f"{y}-{mo - 1:02d}"
+
+
+def judge_month_nav(rows, ctx=None):
+    """#31 (the retired B/b11.mjs #9, B/b14.mjs #16, A/b11.mjs #13, A/b14.mjs #17; SPEC 9 and 11: one month at a time):
+    the month navigation of Change Records and Incidents as approver-1 uses it (misc.py H, one row per page):
+      * month-nav-prev: the "«" link names the month before the shown one (href ?month=<previous>) and opens that month
+        (its URL and its month field); with no record there it says the empty month's sentence for that month, with
+        records it lists them and does not say it;
+      * month-nav-empty: a month without records (ten years before the shown one, asked for by URL) lists nothing and
+        says exactly "No change records in <m>." / "No incidents in <m>." for that month;
+      * month-nav-paging: on Change Records, whose shown month holds more than 50 records on the CI stack, page 1 lists
+        50 and its footer counts them in that month; Older (?month=<m>&page=2) opens page 2 with the rest (at most 50),
+        a footer "Page 2 (<n> records in <m>)", another first row, and Newer;
+      * month-nav-measured: a row for each MONTH_NAV_PAGES page that answered 200 with its month shown and the "«" link
+        followed; the shown month of Change Records lists records (a page that always says "No change records" fails)
+        and more than 50 of them (the premise of Older), measured with page 2 opened."""
+    j = Judge("month-nav", ctx)
+    by_page = {r.get("page"): r for r in rows}
+    for page, (sentence, noun) in MONTH_NAV_PAGES.items():
+        r = by_page.get(page)
+        key = {"page": page}
+        if r is None:
+            j.fail("month-nav-measured", dict(key, row="missing"))
+            continue
+        m = r.get("month") or ""
+        if r.get("status") != 200 or not MONTH_RX.fullmatch(m) or not isinstance(r.get("prev"), dict) \
+                or not isinstance(r.get("empty_month"), dict):
+            j.fail("month-nav-measured", dict(key, status=r.get("status"), month=m, prev="prev" in r, empty_month="empty_month" in r),
+                   {"error": r.get("error")})
+            continue
+        want = _prev_month(m)
+        pv = r["prev"]
+        prev_ok = (r.get("prev_href") == f"?month={want}" and (pv.get("url") or "").endswith(f"{page}?month={want}")
+                   and pv.get("month") == want)
+        if (pv.get("rows") or 0) == 0:
+            prev_ok = prev_ok and pv.get("empty") == sentence.format(m=want)
+        else:
+            prev_ok = prev_ok and pv.get("empty") is None
+        if not prev_ok:
+            j.fail("month-nav-prev", dict(key, shown=m, expected=want),
+                   {"href": r.get("prev_href"), "landing": pv.get("url"), "month": pv.get("month"), "rows": pv.get("rows"),
+                    "empty": pv.get("empty")})
+        em = r["empty_month"]
+        asked = em.get("asked") or ""
+        if not (em.get("status") == 200 and MONTH_RX.fullmatch(asked) and em.get("month") == asked and em.get("rows") == 0
+                and em.get("empty") == sentence.format(m=asked) and em.get("footer") is None):
+            j.fail("month-nav-empty", dict(key, asked=asked),
+                   {k: em.get(k) for k in ("status", "month", "rows", "empty", "footer", "url")})
+        if page != "/batch-control/changes/":
+            continue
+        foot = re.fullmatch(rf"Page 1 \((\d+) {noun} in ({MONTH_RX.pattern})\)", r.get("footer") or "")
+        total = int(foot.group(1)) if foot else 0
+        pg = r.get("paging")
+        if not r.get("rows") or total <= MONTH_PAGE_SIZE or not isinstance(pg, dict):
+            j.fail("month-nav-measured", dict(key, problem="the shown month of Change Records does not hold more than "
+                                                           f"{MONTH_PAGE_SIZE} records, or Older was not measured",
+                                              rows=r.get("rows"), footer=r.get("footer")))
+            continue
+        p2 = pg.get("page2") or {}
+        rest = min(MONTH_PAGE_SIZE, total - MONTH_PAGE_SIZE)
+        if not (foot.group(2) == m and r.get("rows") == MONTH_PAGE_SIZE and pg.get("older_href") == f"?month={m}&page=2"
+                and (p2.get("url") or "").endswith(f"{page}?month={m}&page=2") and p2.get("month") == m
+                and p2.get("rows") == rest and p2.get("footer") == f"Page 2 ({total} records in {m})"
+                and p2.get("first_row") and p2.get("first_row") != pg.get("first_row") and p2.get("newer") == 1):
+            j.fail("month-nav-paging", dict(key, month=m, total=total),
+                   {"rows": r.get("rows"), "older": pg.get("older_href"), "page2": {k: p2.get(k) for k in
+                    ("url", "month", "rows", "footer", "newer")}, "same_first_row": p2.get("first_row") == pg.get("first_row")})
+    return j
+
+
+# ------------------------------------------------------------------ h3/deploy.py (#31, B/b21 #1b)
+# README "Requirements": the plugins Batch Control needs, "resolved for you on installation".
+DEPLOY_REQUIRED = ("cloudbees-folder", "ionicons-api", "caffeine-api")
+# where Deploy Plugin sends the browser: the update center's installation status (core 2.568: the Plugins page's Updates)
+DEPLOY_LANDING = re.compile(r"/(updateCenter|pluginManager/updates)/?$")
+
+
+def judge_deploy(rows, ctx=None):
+    """#31 (the retired B/b21.mjs #1b, BT25; README "Installation": "upload a build under Advanced settings -> Deploy
+    Plugin", "Required plugins ... resolved for you on installation"): h3/deploy.py on a clean controller of the core of
+    pom.xml without any plugin:
+      * deploy-clean-before: before the upload neither batch-control nor any of DEPLOY_REQUIRED is installed and
+        /batch-control/ answers 404 (the guard: what the upload installs was not there already);
+      * deploy-installed: after the upload (pluginManager/uploadPlugin, the form's fields) and a restart, batch-control
+        is installed at the uploaded build's version, enabled and active, every DEPLOY_REQUIRED plugin is installed and
+        active, no installation job failed, no plugin failed to load, and /batch-control/ answers 200;
+      * deploy-measured: one row, no driver error, the controller answered, the plugin list was read before and after,
+        the update center's metadata was downloaded (Check now), and the upload was accepted (302 to the installation
+        status, DEPLOY_LANDING) with its installation jobs read."""
+    j = Judge("deploy", ctx)
+    r = rows[0] if len(rows) == 1 else None
+    if r is None:
+        j.fail("deploy-measured", {"rows": len(rows)})
+        return j
+    uc = r.get("update_center") or {}
+    up = r.get("upload") or {}
+    if (r.get("error") or not r.get("boot_seconds") or not isinstance(r.get("before"), dict)
+            or not isinstance(r.get("after"), dict) or not str(uc.get("plugins") or "").isdigit()
+            or int(uc.get("plugins")) == 0 or up.get("status") != 302 or not DEPLOY_LANDING.search(up.get("location") or "")
+            or not r.get("jobs")):
+        j.fail("deploy-measured", {k: r.get(k) for k in ("error", "boot_seconds", "update_center", "upload")}
+               | {"before": isinstance(r.get("before"), dict), "after": isinstance(r.get("after"), dict), "jobs": r.get("jobs")})
+    before = r.get("before") if isinstance(r.get("before"), dict) else {}
+    there = [p for p in ("batch-control",) + DEPLOY_REQUIRED if p in before]
+    if not isinstance(r.get("before"), dict) or there or r.get("before_page") != 404:
+        j.fail("deploy-clean-before", {"installed before": there, "page before": r.get("before_page")})
+    after = r.get("after") if isinstance(r.get("after"), dict) else {}
+    bc = after.get("batch-control") or {}
+    missing = [p for p in DEPLOY_REQUIRED if not (after.get(p) or {}).get("active")]
+    failed_jobs = [x for x in r.get("jobs") or [] if "Failure" in (x.get("status") or "")]
+    if not (bc.get("version") == r.get("hpi_version") and bc.get("active") is True and bc.get("enabled") is True
+            and not missing and not failed_jobs and r.get("failed") == "[]" and r.get("after_page") == 200):
+        j.fail("deploy-installed", {"batch-control": bc, "expected version": r.get("hpi_version"), "required not active": missing,
+                                    "failed jobs": failed_jobs, "failed plugins": r.get("failed"), "page after": r.get("after_page")})
+    return j
+
+
 def judge(driver, rows, ctx=None):
     ctx = dict(ctx or {})
     if driver == "crawl":
@@ -1560,6 +1822,14 @@ def judge(driver, rows, ctx=None):
         return judge_grants_nowrap(rows, ctx)
     if driver == "dark":
         return judge_dark(rows, ctx)
+    if driver == "month-nav":
+        return judge_month_nav(rows, ctx)
+    if driver == "detail-narrow":
+        return judge_detail_narrow(rows, ctx)
+    if driver == "request-dialog-cancel":
+        return judge_request_dialog_cancel(rows, ctx)
+    if driver == "deploy":
+        return judge_deploy(rows, ctx)
     if driver.startswith("role/"):
         return judge_role(driver.split("/", 1)[1], rows[0] if rows else {}, ctx)
     if driver.startswith("r15/"):

@@ -148,6 +148,8 @@ def a = rt.getMethod('getAgent').invoke(null); a.dump(false); return 'dumped ses
   if [ "${BC_KEEP:-0}" != 1 ] && [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=bc-h3-$K" 2>/dev/null)" ]; then
     BC_H3_HPI=/dev/null docker compose -p "bc-h3-$K" --env-file "$E2E/.env" -f "$E2E/h3/compose.yml" down -v --remove-orphans >/dev/null 2>&1
   fi
+  # #31: the deploy unit's clean controller (h3/deploy.py removes it itself; this covers a step killed by its timeout)
+  if [ "${BC_KEEP:-0}" != 1 ]; then docker rm -f -v "bc-h3-deploy-$K" >/dev/null 2>&1 || true; fi
   for d in "${DRIVER_OUT[@]}"; do
     if [ -d "$E2E/$d" ]; then mkdir -p "$OUT/driver/$(dirname "$d")"; mv "$E2E/$d" "$OUT/driver/$d"; fi
   done

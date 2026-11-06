@@ -20,7 +20,7 @@ F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; foote
 G revoke on the window's detail page (R4-12): holder sees no Revoke, manager revokes, holder loses access
 H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
-import json, re, sys
+import json, re, sys, time
 from lib import Session, close, api, groovy, BASE, clean, gone, opened, submit_and_wait
 import lib
 
@@ -419,6 +419,42 @@ def narrow_tabs():
             s.page.screenshot(path=str(lib.SHOTS / f"R3-C-{user}-overview-{width}.png"))
         s.done()
     lib.h1.report("tab-bar-narrow", rows)
+    narrow_details()
+
+
+# #31 (the retired B/section-a.mjs #27 and B/audit/sa-read.mjs #14, A-17): a run request's and a grant request's page as
+# their approver reads it, at 1280 and 800 px: the page does not scroll sideways and its summary table (the first table
+# of the main panel: Job or Scope, Status, ...) is core's compact table. Judged by ci/h1_rules.py ("detail-narrow").
+DETAIL_JS = """() => { const de = document.documentElement; const mp = document.querySelector('#main-panel');
+  const t = mp && mp.querySelector('table'); const box = e => { const r = e.getBoundingClientRect();
+    return {left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width)}; };
+  return {scrollW: de.scrollWidth, clientW: de.clientWidth, main: mp ? box(mp) : null,
+          table: t ? Object.assign(box(t), {cls: t.className, scrollW: t.scrollWidth, clientW: t.clientWidth,
+                                            rows: t.querySelectorAll('tbody tr').length,
+                                            heads: [...t.querySelectorAll('tbody tr > th')].slice(0, 3).map(h => h.textContent.trim())}) : null}; }"""
+
+
+def narrow_details():
+    t0 = time.time()
+    ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
+    rows = []
+    s = Session(lib.h1.DETAIL_NARROW_USER)
+    for kind, key in lib.h1.DETAIL_NARROW_PAGES:
+        for width in lib.h1.DETAIL_NARROW_WIDTHS:
+            s.page.set_viewport_size({"width": width, "height": 900})
+            path = f"/batch-control/{kind}/{ids[key]}/"
+            resp = s.go(path)
+            row = {"user": lib.h1.DETAIL_NARROW_USER, "kind": kind, "width": width, "status": resp.status if resp else None}
+            try:
+                row.update(s.page.evaluate(DETAIL_JS))
+            except Exception as e:  # noqa: recorded; a row without the table fails detail-narrow-measured
+                row["error"] = str(e)[:200]
+            rows.append(row)
+            lib.log("round3", dict(row, sec="C", what="detail page at a narrow width"))
+            s.page.screenshot(path=str(lib.SHOTS / f"R3-C-{kind}-detail-{width}.png"))
+    s.done()
+    lib.log("round3", {"sec": "C", "what": "detail pages measured", "seconds": round(time.time() - t0, 1)})
+    lib.h1.report("detail-narrow", rows)
 
 
 # ---------------------------------------------------------------- D, E
@@ -692,6 +728,67 @@ def run_dialog(s, where, tag):
     return url_open, stays, errs, landing
 
 
+# #31 (the retired B/audit/b4.mjs #4 and B/verify/v5.mjs #4, G-36): the Request Run dialog's Cancel closes the dialog
+# and files nothing; the same dialog, filled the same way and submitted, files one request (the guard). Requests are
+# counted in the store by a reason unique to the run (script console), not on a list page. Judged by ci/h1_rules.py
+# ("request-dialog-cancel").
+STORED = """def st = jenkins.model.Jenkins.get().pluginManager.uberClassLoader.loadClass('io.jenkins.plugins.batchcontrol.store.Store')
+    .getMethod('get').invoke(null)
+return groovy.json.JsonOutput.toJson(st.listRunRequests().findAll { it.reason == %s }.collect { it.id + ' ' + it.status })"""
+
+
+def stored_with(reason):
+    out = groovy(STORED % json.dumps(reason)).replace("Result: ", "")
+    try:
+        return json.loads(out)
+    except ValueError:
+        return ["unreadable: " + out[:120]]
+
+
+def cancel_run_dialog(s, where, tag, job):
+    t0 = time.time()
+    reason = f"e2e-31 {tag} request dialog cancel {int(time.time() * 1000)}"
+    row = {"ui": tag, "user": s.user, "job": job, "reason": reason, "stored_before": stored_with(reason)}
+    posts = []
+    s.page.on("response", lambda r: posts.append(f"{r.status} {r.url.replace(BASE, '')}")
+              if r.request.method == "POST" and "/batch-control/" in r.url else None)
+    try:
+        s.page.locator(where, has_text="Request Run").first.click()
+        s.page.wait_for_selector("dialog[open] textarea[name=reason]")
+        url_open = s.page.url
+        d = s.page.locator("dialog[open]").first
+        d.locator("textarea[name=reason]").fill(reason)
+        tick(d, "approvers", "approver-1")
+        cancel = d.get_by_role("button", name="Cancel", exact=True)
+        row["cancel_buttons"] = cancel.count()
+        s.shot("dialog[open]", f"R3-H-{tag}-run-dialog-before-cancel")
+        cancel.first.click()
+        row["closed"] = gone(s.page, timeout=5000)
+        s.page.wait_for_load_state("load")
+        row["url_unchanged"] = s.page.url == url_open
+        row["posts_on_cancel"] = list(posts)
+        row["stored_after_cancel"] = stored_with(reason)
+        if not row["closed"]:  # a Cancel that does not close: close it otherwise, so the guard is still measured
+            s.page.keyboard.press("Escape")
+            if not gone(s.page, timeout=3000):
+                s.page.reload(); s.page.wait_for_load_state("load")
+        # the guard: the same dialog, filled the same way, submitted
+        s.page.locator(where, has_text="Request Run").first.click()
+        s.page.wait_for_selector("dialog[open] textarea[name=reason]")
+        d = s.page.locator("dialog[open]").first
+        d.locator("textarea[name=reason]").fill(reason)
+        tick(d, "approvers", "approver-1")
+        row["landing"] = submit_dialog(s, d, "Submit Request").replace(BASE, "")
+        row["stored_after_submit"] = stored_with(reason)
+    except Exception as e:  # noqa: recorded; a row without the measurements fails request-dialog-cancel-measured
+        row["error"] = repr(e)[:300]
+    for x in row.get("stored_after_submit") or []:  # leave no pending request behind (an identical later one is refused)
+        row.setdefault("cleanup", []).append(api(s.user, f"/batch-control/requests/{x.split()[0]}/cancel", "POST").status_code)
+    row["seconds"] = round(time.time() - t0, 1)
+    lib.log("round3", dict(row, sec="H", what="Request Run dialog Cancel"))
+    return row
+
+
 def grant_dialog(s, where, tag):
     """D-71: the prefill is the item's full name; the kind comes from the name check (no scope type selector)."""
     s.page.locator(where, has_text="Request Change Permission").first.click()
@@ -713,7 +810,11 @@ def grant_dialog(s, where, tag):
 
 def sec_H():
     # new job page: requester, app bar Request Run, overflow menu Request Change Permission
+    cancel_rows = []
     s = Session("requester")
+    s.go("/job/batch-daily/")
+    cancel_rows.append(cancel_run_dialog(s, ".jenkins-app-bar a, .jenkins-app-bar button, [data-testid] button, a, button", "new",
+                                         "batch-daily"))
     s.go("/job/batch-daily/")
     u, stays, errs, landing = run_dialog(s, ".jenkins-app-bar a, .jenkins-app-bar button, [data-testid] button, a, button", "new")
     st = api("requester", re.sub(r"^.*?/batch-control/", "/batch-control/", landing)).status_code
@@ -739,6 +840,8 @@ def sec_H():
 u.addProperty(new jenkins.model.experimentalflags.UserExperimentalFlagsProperty(m)); u.save(); return 'ok'""")
     s = Session("classic")
     s.go("/job/batch-pipeline/")
+    cancel_rows.append(cancel_run_dialog(s, "#tasks a, #tasks button", "classic", "batch-pipeline"))
+    s.go("/job/batch-pipeline/")
     u, stays, errs, landing = run_dialog(s, "#tasks a, #tasks button", "classic")
     check("H", "classic side panel: Request Run dialog, validation, UUID landing", stays and errs and re.search("/requests/" + UUID, landing),
           url_open=u.replace(BASE, ""), errors=errs, landing=landing.replace(BASE, ""))
@@ -758,6 +861,7 @@ u.addProperty(new jenkins.model.experimentalflags.UserExperimentalFlagsProperty(
           pre == ("Folder", "prod") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
     console_ok("H", s, "folder dialog")
     s.done()
+    lib.h1.report("request-dialog-cancel", cancel_rows)
 
 
 # ---------------------------------------------------------------- I

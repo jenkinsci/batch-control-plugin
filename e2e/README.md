@@ -129,7 +129,26 @@ its permissions; the card's pattern button lists exactly the items the server ma
 role asks first, Cancel keeps and OK removes the role; the Permission Templates Add Template dialog creates a template
 with the chosen permissions and its card's Delete template, confirmed, removes it; the strategy class is read after
 every step: `role-edit`, `role-pattern-check`, `role-delete`, `template-add`, `template-delete`, `role-edit-measured`,
-`role-edit-requests`), next to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
+`role-edit-requests`), `r14/misc.py` H (`month-nav`: on Change Records and Incidents as approver-1 the "«" link opens
+the previous month (`?month=<m-1>`, January to December of the year before) with its month field, saying the empty
+month's sentence exactly when it lists nothing; a month without records, asked for by URL, lists nothing and says "No
+change records in <m>." / "No incidents in <m>." without a footer; Change Records' shown month holds more than 50
+records on the CI stack, so page 1 lists 50 with the footer "Page 1 (<n> records in <m>)" and Older opens page 2 with
+the rest, its own footer, another first row and Newer: `month-nav-prev`, `month-nav-empty`, `month-nav-paging`,
+`month-nav-measured`; Incidents' paging is a JenkinsRule row), `r14/round3.py` C (`detail-narrow`: a pending run
+request's and a pending grant request's page as approver-1 at 1280 and 800 px do not scroll sideways, the summary table
+has no hidden overflow, ends inside the viewport and is core's compact `jenkins-table--small`: `detail-narrow-scroll`,
+`detail-narrow-compact`, `detail-narrow-measured`), `r14/round3.py` H (`request-dialog-cancel`: the Request Run dialog
+on the new job page of batch-daily as requester and on the classic page of batch-pipeline as classic, filled with a
+reason of its own and an approver: Cancel, the dialog's one Cancel button, closes it on the job page, posts nothing and
+stores no request with that reason; the same dialog submitted stores exactly one PENDING request and lands on its page:
+`request-dialog-cancel`, `request-dialog-cancel-guard`, `request-dialog-cancel-measured`; the page form's Cancel link is
+a JenkinsRule row), `r14/role/manage_roles.py`'s third part (`role/manage_perms`, as admin under the Batch Control role
+strategy: Global roles' Add Role offers all five Batch Control permissions and Item roles' offers BatchControl/Request,
+core's Job/Read read in both as the reader's proof; the item role e2e31-bcreq saved there with Job/Read and
+BatchControl/Request is listed after a reload and holds exactly those two on the server, then is removed:
+`role-bc-perms`, `role-bc-save`, `role-bc-perms-measured`), `h3/deploy.py` (`deploy`, see "Deploy Plugin driver"), next
+to #129's `helpcheck.py` layout and `s_monitor.py` DEF-04 rules.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
@@ -390,7 +409,10 @@ itself did not succeed. Its log gives the reason in one line.
   Docker allows it; the Jenkins container gets no extra capability). The unit `h3-upgrade` (gap H3) starts a second
   controller from the same image on `localhost:$((BC_PORT + 100))` (18180) with its own compose project and volume, and
   downloads the released `batch-control.hpi` from updates.jenkins.io (redirected to a get.jenkins.io mirror) unless
-  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`).
+  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`). The unit
+  `h3-deploy` (#31) starts a clean controller from the same image's `jenkins.war` on `localhost:$((BC_PORT + 200))`
+  (18280), container `bc-h3-deploy-<shard>`, and resolves the plugin's required plugins from updates.jenkins.io and
+  its mirrors.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
   the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
@@ -873,6 +895,26 @@ e2e/ci/run.sh 4/7`. Not covered: an upgrade between two different code bases (on
 the same `src/main`, so today the unit guards the next change), Pipeline jobs, folders, file and secret parameters
 (`r19/restart.py` covers those across a restart), role-strategy, a JCasC-configured Batch Control, retention.
 
+## Deploy Plugin driver (`h3/deploy.py`, #31)
+
+CI unit `h3-deploy` (group "admin and role strategy", not `last`, weight 0.8 in `ci/shard.py`; the check of the retired
+`legacy/` B/b21.mjs #1b, README "Installation"). A controller of its own next to the shard's: the image of
+`docker-compose.yml` started with `--entrypoint java ... -jar /usr/share/jenkins/jenkins.war` and an empty JENKINS_HOME,
+so none of the baked plugins of `plugins.txt` is copied in: core 2.568.3 without any plugin, without security and
+without the setup wizard. The driver reads the plugin list and `/batch-control/` (404), presses Check now
+(`pluginManager/checkUpdatesServer`, retried), uploads `target/batch-control.hpi` the way Advanced settings -> Deploy
+Plugin posts it (`pluginManager/uploadPlugin`, file field `name`, empty `pluginUrl`), reads the update center's
+installation jobs until none is pending, restarts (`safeRestart`) and reads the plugin list, `failedPlugins` and
+`/batch-control/` again. Judged by `ci/h1_rules.py` `deploy`: `deploy-clean-before` (neither Batch Control nor
+cloudbees-folder, ionicons-api, caffeine-api installed before), `deploy-installed` (Batch Control at the build's
+`Plugin-Version`, enabled and active, the three required plugins active, no failed installation job or plugin,
+`/batch-control/` 200), `deploy-measured`. Rows in `h3/out/deploy.json`, the controller log in
+`h3/out/deploy-jenkins.log`. 27 to 40 s locally (boot 2 s, Check now 4 s, the upload with four plugins 8 to 20 s, the
+restart 12 s). The container is removed at the end (`BC_KEEP=1` keeps it; `ci/run.sh` removes one a killed step left).
+Proof hook `BC_H3_DEPLOY_HPI=<file>`: another `.hpi`, e.g. one whose manifest requires `caffeine-api:99.0` fails
+`deploy-installed` ("Plugin is missing: caffeine-api (99.0)"); never set in CI. Alone: `venv/bin/python e2e/h3/deploy.py`
+(needs Docker, the image and `target/batch-control.hpi`).
+
 ## e2e-21 driver (`r21/`): Reject button colour
 
 CI unit `r21-reject-color` (weight 0.3, the lightest and listed last, so adding it left every other unit in its shard).
@@ -1047,4 +1089,6 @@ role-strategy 927 forwarding check (D-35g, 2026-10-04). The `r13/` scripts were 
 `casc/profile-role.yaml`; then `manage_roles.py`, `assign_roles.py`, `grant_overlay.py`, `endpoints.py`).
 `manage_roles.py` adds e2e13-global and e2e13-team in the browser (kept for the later scripts), then (#31, the checks
 of the retired `r6/s2b.py` and `r6/s2d.py`) edits, pattern-checks and deletes its own item role e2e31-prod and adds and
-deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`).
+deletes the permission template e2e31-tpl, leaving neither behind (screenshots `RS-31-01`..`RS-31-05`), and (#31, the
+check of the retired `legacy/` B/b8-role.mjs #1) reads the permissions both Add Role dialogs offer and adds the item role
+e2e31-bcreq with Job/Read and BatchControl/Request, removed again over REST (screenshot `RS-31-06`).

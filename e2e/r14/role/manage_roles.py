@@ -278,3 +278,58 @@ for k, v in ed.items():
     print(k, "=>", v)
 log("manage_edit", ed)
 lib.h1.report("role/manage_edit", [ed])
+
+# ---------------------------------------------------------------- #31: the Batch Control permissions in Add Role
+# (the retired B/b8-role.mjs #1): the permissions each Add Role dialog offers (global and item roles), read in the same
+# dialogs as core's; then an item role saved through the dialog with BatchControl/Request (scope ITEM, D-38a) and Job/Read
+# keeps both on the server; removed again over role-strategy's own endpoint. Judged as judge_role "manage_perms".
+PERM_ROLE, PERM_PATTERN = lib.h1.RS_PERMS_ROLE, lib.h1.RS_PERMS_PATTERN
+pm = {}
+reqs3 = []
+t0 = __import__("time").time()
+try:
+    s = Session("admin")
+    s.page.on("response", lambda r: reqs3.append(f"{r.status} {r.request.method} {r.url.replace(BASE, '')}")
+              if ("/role-strategy/" in r.url or "/descriptor/" in r.url) and "/static/" not in r.url else None)
+    s.go("/manage/role-strategy/manage-roles")
+    for tab, key in (("Global roles", "global"), ("Item roles", "item")):
+        d = open_add(tab)
+        pm[f"{key} dialog"] = dialog_title(s.page)
+        pm[f"{key} offered"] = sorted(set(d.locator("[data-permission-id]").evaluate_all(
+            "els => els.map(e => e.getAttribute('data-permission-id'))")))
+        if key == "global":
+            s.page.keyboard.press("Escape")
+            pm["global closed"] = gone(s.page)
+            continue
+        d.locator("#rsp-role-name").fill(PERM_ROLE)
+        with s.page.expect_response(lambda r: r.url.endswith("/checkPattern") and r.request.method == "POST") as chk:
+            d.locator("#rsp-role-pattern").fill(PERM_PATTERN)
+            d.locator("#rsp-role-pattern").press("Tab")
+        chk.value.text()
+        s.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        for pid in lib.h1.RS_PERMS_SAVED:
+            d.locator(f"[data-permission-id='{pid}'] label").click()
+        pm["ticked"] = sorted(d.locator("[data-permission-id] input:checked").evaluate_all(
+            "els => els.map(e => e.closest('[data-permission-id]').getAttribute('data-permission-id'))"))
+        s.shot(d, "RS-31-06-add-item-role-batch-control-request")
+        d.get_by_role("button", name="Add").click()
+        pm["item closed"] = gone(s.page, timeout=5000)
+    s.go("/manage/role-strategy/manage-roles")
+    pm["listed after reload"] = card(s.page, PERM_ROLE).count()
+    pm["server role"] = server_role(PERM_ROLE)
+    pm["strategy"] = strategy()
+    pm["console"] = list(s.console)
+    pm["bad"] = list(s.bad)
+    s.done()
+except Exception as e:  # noqa: recorded; judge_role "manage_perms" fails what was not measured
+    pm["error"] = repr(e)[:1500]
+close()
+pm["remove"] = lib.api("admin", "/role-strategy/strategy/removeRoles", "POST",
+                       data={"type": "projectRoles", "roleNames": PERM_ROLE}).status_code
+pm["server role after remove"] = server_role(PERM_ROLE)
+pm["requests"] = reqs3
+pm["seconds"] = round(__import__("time").time() - t0, 1)
+for k, v in pm.items():
+    print(k, "=>", v)
+log("manage_perms", pm)
+lib.h1.report("role/manage_perms", [pm])
