@@ -604,10 +604,70 @@ JenkinsRule test now asserts, SPEC/DECISIONS made obsolete, or that only printed
 - `s_classic.py`: `r14/jobui.py` classic and `r15/side_dialog.py` (h1 jobui), `r14/round3.py` A; T-UI-13/112; the folder DELETE is obsolete (D-71).
 - `s_dialogs.py`: T-GAP-344 GrantPageGapTest, T-UI-99 RequestDialogTest, T-GAP-130; h1 jobui; `r16/d60.py` N; `r14/round3.py` I.
 - `approve_api.py`, `grant_api.py`, `s_activation.py` (helpers): arranged grants and an activation for the removed scenarios only.
+- (Earlier, e2e-16 removed `s_folder_only.py` and `s_folder_only_ui.py` with the D-65 folder-only window; their D-71
+  counterparts are `r16/items.py` F and D and `r14/round3.py` A.)
 
-What is left in `scripts/` and `r6/`..`r11/` still holds a check that nothing in CI asserts yet (#31), or arranges
-state for such a driver (or for the CI setup steps `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`; `r12/lib.py`
-loads `r6/lib.py`).
+Stage three then removed the last 28 drivers there and 11 files that only they used. Each of these drivers held a check
+that nothing asserted at the audit (its 26 gaps); every gap now has a guard, a JenkinsRule row (`docs/TEST-MATRIX.md`
+note 369) or a CI judge, and the drivers' other checks were already guarded. The first names below are the new guards:
+
+`scripts/`
+- `rest-approvers-empty.sh`: T-03-95 RequestScreenGuardTest (no approvers configured); T-03-08 MultiApproverTest.
+- `rest-grant-configure.sh`: T-08-292 GrantConfigureAccessTest (a window holder's configure form); T-08-14/17, T-08-01/03 GrantServiceTest, T-09-93; `r27/titles_revert.py` W.
+- `rest-screens-v2.sh`: T-UI-294/295 ApprovalScreenRecentRunsTest (the recent-runs columns and count), T-UI-296 GrantScreenPolishTest ("1 minute"); T-UI-01/02/05/06, T-UI-270 DecisionAreaTest, T-08-290; `r19/gate.py` A; h1 help.
+- `rest-screens.sh`: T-06-112 JobRunSidebarEntryTest (an uncontrolled job keeps Build Now), T-05-208 RequestScreenGuardTest (the Requester row); T-UI-01, T-02-45; `r19/gate.py` B, `r22/nonascii_reason.py`, `r24/json_params.py` V, `r27/decision_tables.py` O, `r27/titles_revert.py` X.
+- `grant-setup.sh` (helper): arranged the window of `rest-screens-v2.sh` only.
+
+`r6/`
+- `s2b.py`, `s2d.py`: `r14/role/manage_roles.py` second part (h1 role/manage_edit: role-edit, role-pattern-check, role-delete, template-add, template-delete); T-02-89..92 RoleStrategySurfaceTest.
+- `s4a.py`: T-UI-297 NewJobPageEntriesTest (the grant dialog of a job two folders deep); T-UI-119; h1 jobui.
+- `s4d.py`: T-UI-298 RequestScreenGuardTest (the Request Run form's title, heading and breadcrumb); T-UI-110/111 ActivationPageLayoutTest, T-06-15, T-UI-10.
+- `s5a.py`: `r21/reject_color.py` D (h1 destructive, "configuration page"); T-UI-27/28 ConfigPagePolishTest, T-UI-52, RevertPlacementTest; `r27/titles_revert.py`.
+- `s5b.py`: T-UI-299/300/301 SectionTabsPageMarkupTest (the current tab, compact tables, no back link); T-UI-40/42..45 SectionTabsTest; h1 badges, crawl design references.
+- `arrange.py`, `grants.py`, `s2common.py` (helpers): the `mover1..3` accounts, `prod/` and windows of the removed scenarios (`r7/arrange.py` adds the same accounts and folder), and the shared check of `s2b.py` and `s2d.py`.
+
+`r7/`
+- `a_ui.py`, `n_newjob.py`: T-UI-297, T-UI-299; T-UI-55 RequestRunAppBarTest, T-UI-40/43, T-UI-27/28; `r14/round3.py` C, `r16/d60.py` N, `r27/titles_revert.py`.
+- `b_rerun.py`: T-11-37 IncidentRerunGuidanceTest (already there: no rerun form for a ViewHistory holder without Request), T-GAP-132; T-05-09/10 RequesterBuildPermissionTest, T-05-21.
+- `c_hist.py`: T-UI-300/301, T-UI-302 GrantScreenPolishTest (the grant form's dropdown); T-12-03/05 HistoryWebTest, T-GAP-170, T-09-21; h1 crawl, misc K; `r19/guard.py`.
+- `e_dark.py`: `r14/misc.py` K (h1 dark: dark-table, dark-alert, dark-tab); `r14/round3.py` C.
+- `n_classic.py`: T-UI-298; T-UI-10/15 JobGrantSidebarEntryTest, T-06-15; `r14/jobui.py` classic, `r15/side_dialog.py` (h1 jobui).
+
+`r8/`
+- `monitor.py`: T-UI-304 StrategyMonitorReviewAccessTest and StrategyMonitorUnresolvedItemTest (Mark as reviewed is a button); h1 targeted monitor_def04 and mark-reviewed; T-02-64.
+
+`r9/`
+- `s72.py`, `s72b.py`: T-UI-303 NewJobPageEntriesTest (the Batch Control card; core's Legacy card holds none of it); T-06-105, T-UI-111.
+- `checklist.py`: T-UI-300/301/302; T-UI-27/28, T-UI-43, T-UI-50/51 PolishMarkupTest, T-02-07, MatrixStrategyTest; h1 destructive, crawl; `r16/d60.py` R.
+- `s86.py`: T-02-198, T-UI-304 StrategyMonitorReviewAccessTest; T-02-194/195 StrategyMonitorGapTest.
+- `s89.py`: `r14/round3.py` F (h1 grants-nowrap); T-UI-99; h1 destructive.
+- `lib.py`, `grants.py` (helpers): used by the removed `r9/` scripts only.
+
+`r10/`
+- `s86.py`: T-02-198/199/200 StrategyMonitorReviewAccessTest (the reviewed page, the old monitor URL, markReviewed for BatchControl/Manage), T-UI-296; T-02-194/195.
+- `s89.py`: `r14/round3.py` F (h1 grants-nowrap).
+- `lib.py`, `setup_grants.py` (helpers): used by the removed `r10/` scripts only.
+
+`r11/`
+- `s_rundlg_err.py`: T-05-209 RequestScreenGuardTest (a refused Request Run keeps the ticked approver and the parameter); T-UI-105, T-GAP-130; h1 jobui.
+- `s_tabs.py`: `r14/round3.py` C (h1 tab-bar-narrow, 1024 and 800 px).
+- `s_dark_monitor.py`: `r14/misc.py` K (h1 dark); T-02-33; h1 targeted monitor.
+- `s_newmenu.py`: T-UI-297; T-UI-119; h1 jobui.
+- `lib.py`, `arrange.py` (helpers): `r12/arrange.py`, a CI setup step, arranges the same users and items.
+
+`casc/`
+- `profile-role-naming.yaml`: applied by hand for the removed `r10/d59b.py` (T-SEC-73/75 MoveNamingStrategyTest); `r19/naming.py` applies its own `profile-role-naming-window.yaml`.
+
+What is left in these directories is used by other files; `r9/`, `r10/` and `r11/` are gone:
+- `scripts/`: `up.sh`, `down.sh`, `reset.sh` ("Lifecycle"); `cli.sh` and the `lib.sh` it sources ("Older scenario
+  scripts"; drivers in `legacy/` call `cli.sh`); `ldap-up.sh`, `ldap-down.sh` (the LDAP profile, "Other profiles").
+- `r6/lib.py`: the shared browser driver; `r7/lib.py`, `r8/lib.py`, `r12/lib.py`, `r14/lib.py`, `r14/role/lib.py`,
+  `r15/lib.py` and `r16/lib.py` load it by path, and the later `lib.py` files load one of those.
+- `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`: CI setup steps (`ci/shard.py` SETUP), with the `r7/lib.py` and
+  `r8/lib.py` they import.
+- `casc/`: `jenkins.yaml` (every boot), `profile-role.yaml` (`r14/role/setup.py`), `profile-role-naming-window.yaml`
+  (`r19/naming.py`), `profile-ldap.yaml` (by hand, "Other profiles"), `profile-role-r3.yaml`
+  (`legacy/browser/verify/role-r3.mjs`).
 
 The same stage then removed 128 files from `legacy/` on the same terms (the per-check audit of 2026-11-06). The Node
 drivers only logged; a check counted where the report or the checklist row that ran them judged it.
@@ -720,13 +780,8 @@ For a machine without Node.js: `r6/lib.py` is `legacy/extra/lib.mjs` ported to P
 (`python3 -m venv venv && venv/bin/pip install -r e2e/ci/requirements.txt`, Python >= 3.10, the
 pinned set of the CI pass; it drives the installed
 Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
-`screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
-and the `prod/` folder (script console, arrangement only; JCasC drops the accounts' matrix entries
-on the next boot), `grants.py <user> <full name> <ACTIONS> [minutes]` requests a
-window over REST and has `approver-1` approve it. Scenarios left (see "Removed drivers"): `s2b.py` and `s2d.py`
-role-strategy 918 pages under the Batch Control role strategy (`casc/profile-role.yaml`, which `r14/role/setup.py`
-applies; `s2common.py` is their shared check). They work on the item role `e2e-prod` (pattern `prod/.*`, Item/Read) that the removed `s2a.py` added on Manage
-Roles, so add that role first. `s4a.py` and `s4d.py` new job page, `s5a.py` configuration page, `s5b.py` tab bar.
+`screenshots/run-6/`, logs to `r6/out/` (git-ignored). It is the only file left in `r6/` (see "Removed drivers"):
+every CI driver loads it, directly or through a later `lib.py`.
 
 The `rebuild` plugin's "Rebuild Last" entry has a null URL on a job without builds, which makes
 the new job page's "More actions" menu fail to open (core JS `menuItem` throws). For new job page
@@ -738,51 +793,19 @@ and restart; remove the marker afterwards.
 Round E2E-2 (full regression, 2026-10-03). `r7/lib.py` loads `r6/lib.py` and only moves the
 screenshots to `screenshots/run-7/` and the logs to `r7/out/`. `arrange.py` adds `mover1..3`,
 `folderreq` (BatchControl/Request only on the `team/` folder matrix), `reqhist` (Request +
-ViewHistory, no Build), `team/sub/deep-job` and `prod/`; it is also a CI setup step (`ci/shard.py` SETUP).
-Scenarios left (see "Removed drivers"): `b_rerun.py` (D-38a), `c_hist.py`, `e_dark.py`, `a_ui.py`, `n_newjob.py`,
-`n_classic.py`. JCasC re-applies the matrix on every boot, so re-run
-`arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
+ViewHistory, no Build), `team/sub/deep-job` and `prod/`; it is a CI setup step (`ci/shard.py` SETUP). The round's
+scenarios were removed (see "Removed drivers"). JCasC re-applies the matrix on every boot, so re-run
+`arrange.py` after a restart.
 
-## e2e-11 driver (`r11/`)
-
-(e2e-16: `s_folder_only.py` and `s_folder_only_ui.py`, which checked the reach of the D-65 folder-only window, were
-removed with that scope type; their D-71 counterparts are `r16/items.py` F and D and `r14/round3.py` A.)
-
-Round E2E-6 (hosting review round 3, 2026-10-04). `r11/lib.py` is `r10/lib.py` with screenshots in
-`screenshots/run-11/` and logs in `r11/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
-`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py` and `r11/arrange.py` (users `classic`, the requester's
-permissions with the new job page turned off, and `fonly`, Read+Move+RequestGrant; `ops/a`, `ops/sub/b`, the
-multibranch `ops/mb`, the non-approval job `fast`). `r14/seed_fast.py` queues 60 admin builds of `fast` for the
-dashboard bound. Scenarios left (see "Removed drivers"): `s_rundlg_err.py` (Request Run dialog validation),
-`s_tabs.py` (turns `new-build-page.flag` on for admin and back), `s_newmenu.py`, `s_dark_monitor.py`.
-
-## e2e-10 driver (`r10/`)
-
-Round E2E-5 (targeted re-check, 2026-10-03). `r10/lib.py` is `r9/lib.py` with screenshots in
-`screenshots/run-10/` and logs in `r10/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
-`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`. Order of what is left (see "Removed drivers"):
-`setup_grants.py a` (mover1 windows approved by approver-2), revoke the DELETE window
-(`POST /batch-control/grants/active/<id>/revoke`), `setup_grants.py b <id>` (pending 1-minute request), `s89.py`
-(grants tables at 1280 px; `TAG=-b` for a second pass), `s86.py <1-minute grant id>` (monitor sentence, Mark as
-reviewed, old URL). The e2e-10 run also moved `prod/mv-job` with the DELETE window before revoking it, with the
-removed `move.py`; `s86.py` and `s89.py` do not need the move.
-
-## e2e-09 driver (`r9/`)
-
-Round E2E-4 (backlog fixes #71-#91, 2026-10-03). `r9/lib.py` is `r8/lib.py` with screenshots in
-`screenshots/run-9/` and logs in `r9/out/`. Arrange with `r7/arrange.py`, `r8/arrange.py` and
-`r8/arrange_side.py`; `grants.py <user> <full name> <ACTIONS> [minutes]` requests a window over REST and has
-`approver-1` approve it. Scripts left (see "Removed drivers"): `s72.py`/`s72b.py` (new job page card, classic page),
-`s86.py`, `s89.py` (grants tables at 1280 px, with active and ended windows), and `checklist.py`. The scripts
-create state and are not idempotent: run them once on a fresh JENKINS_HOME, in that order.
+The e2e-09, e2e-10 and e2e-11 drivers (`r9/`, `r10/`, `r11/`) were removed (see "Removed drivers"); the e2e-11
+arrangement lives on as `r12/arrange.py`.
 
 ## Older scenario scripts
 
-`scripts/rest-*.sh` (curl with crumb and cookie jar, raw output to `out/`) are
-from e2e-01/e2e-02; `lib.sh` knows every account above. Four are left (see "Removed drivers"):
-`rest-approvers-empty.sh`, `rest-grant-configure.sh`, `rest-screens.sh` and `rest-screens-v2.sh` (which calls
-`grant-setup.sh`). `scripts/cli.sh <user>
-<command>` runs jenkins-cli inside the container (it needs Java 21).
+`scripts/lib.sh` (curl with crumb and cookie jar, raw output to `out/`) is from e2e-01/e2e-02 and knows every account
+above; a REST-path script sources it with `. "$(dirname "$0")/lib.sh"`. The `rest-*.sh` scripts that used it were
+removed (see "Removed drivers"). `scripts/cli.sh <user> <command>` runs jenkins-cli inside the container (it needs
+Java 21); under `compose.prefix.yml` it needs `BC_PREFIX=/jenkins`.
 
 ## Re-audit driver (`legacy/browser/audit/`, `legacy/browser/verify/`)
 
@@ -825,7 +848,7 @@ Round E2E-3 (targeted, 2026-10-03). `r8/lib.py` is `r7/lib.py` with screenshots 
 BatchControl/Request + Item/Read only on folder `ops/`), `mover1`, and the one-minute timer jobs
 `ops/cron-a`, `prod/mv-job`, `prod/mvf/inner-job`, `prod/adm-job`, `prod/admf/adm-inner` (timer not
 blocked); `arrange_side.py` adds `side/job-b` where `opsreq` has Item/Read only. Both are CI setup steps
-(`ci/shard.py` SETUP). Scenario left (see "Removed drivers"): `monitor.py` (Mark as reviewed). Run under
+(`ci/shard.py` SETUP). The round's scenarios were removed (see "Removed drivers"). Run under
 `compose.prefix.yml`; re-run `arrange.py` after a restart (JCasC drops the
 added matrix entries).
 
@@ -834,7 +857,9 @@ added matrix entries).
 Round E2E-7 (every button, link and dialog, 2026-10-04). `r12/lib.py` loads `r6/lib.py` with screenshots in
 `screenshots/run-12/` and logs in `r12/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
 `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then the seed scripts. Of the round's
-scripts only `lib.py`, `arrange.py` and `s_monitor.py` stay here; the crawl, seed, action, job-UI and targeted
+scripts only `lib.py`, `arrange.py` and `s_monitor.py` stay here (`arrange.py` is the e2e-11 arrangement: users
+`classic`, the requester's permissions with the new job page turned off, and `fonly`, Read+Move+RequestGrant; `ops/a`,
+`ops/sub/b`, the multibranch `ops/mb`, the non-approval job `fast`); the crawl, seed, action, job-UI and targeted
 scripts live on, extended, as their `r14/` counterparts, which CI runs (the older r12 versions were removed in stage one of
 #31, see "Removed drivers").
 

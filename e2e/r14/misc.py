@@ -490,7 +490,8 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
 
 
 def create_window(user, item, actions=("CREATE",)):
-    """An approved permission window for user on item (REST, as r9/grants.py); returns its id or None."""
+    """An approved permission window for user on item (REST: user requests it, approver-1 approves it); returns its id
+    or None."""
     data = [("scopeFullName", item), ("durationMinutes", "15"), ("reason", f"e2e-12 misc R premise for {user}"),
             ("approvers", "approver-1")] + [("actions", a) for a in actions]
     r = api(user, "/batch-control/grants/create", "POST", data=data)
