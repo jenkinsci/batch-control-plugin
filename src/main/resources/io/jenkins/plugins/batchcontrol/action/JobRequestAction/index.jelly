@@ -10,8 +10,9 @@
        job's build bar, tabs and app bar actions above it, and the classic UI the job's sidepanel
        as before (l:job-subpage reads it.object, the job). l:job-subpage does not take a
        permissions attribute, so the check l:layout permissions="..." made is made here, against
-       the same nearest access-controlled ancestor, the job. -->
-  ${h.checkAnyPermission(it, it.viewPermissions)}
+       the same nearest access-controlled ancestor, the job. #132: through it, not h: h is only
+       defined inside l:layout (l:view), so h.checkAnyPermission here would check nothing. -->
+  ${it.checkViewPermission()}
   <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
   <l:job-subpage>
       <!-- The new job page names the job in its build bar already. -->
