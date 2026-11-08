@@ -44,6 +44,16 @@ public class ActiveGrantsSection {
     }
 
     /**
+     * #132: the check of {@code index.jelly}, made before its redirect: {@link #getViewPermissions()}
+     * on Jenkins, the nearest access-controlled ancestor, as the parent gate
+     * {@link GrantsSection#getTarget()} does. The view has no layout, so {@code h} (set by
+     * {@code l:view}) is undefined there and {@code h.checkAnyPermission} would check nothing.
+     */
+    public void checkViewPermission() {
+        Jenkins.get().checkAnyPermission(getViewPermissions());
+    }
+
+    /**
      * Stapler: serves {@code /batch-control/grants/active/<grantId>/...}; {@code null} renders a
      * 404 when {@link GrantService} knows no grant with that id, for a malformed id and for any
      * other failed lookup (S-39-01, {@link RecordLookup}). An existing grant that is no longer
@@ -72,6 +82,14 @@ public class ActiveGrantsSection {
          */
         public Permission[] getViewPermissions() {
             return SectionAccess.grants();
+        }
+
+        /**
+         * #132: the check of {@code index.jelly}, made before its redirect; see
+         * {@link ActiveGrantsSection#checkViewPermission()}.
+         */
+        public void checkViewPermission() {
+            Jenkins.get().checkAnyPermission(getViewPermissions());
         }
 
         /**

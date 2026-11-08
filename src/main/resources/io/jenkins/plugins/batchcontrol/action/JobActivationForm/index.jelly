@@ -15,8 +15,9 @@
   <j:choose>
     <j:when test="${jobSubpage}">
       <!-- l:job-subpage takes no permissions attribute, so the check l:layout permissions="..."
-           makes is made here, against the same nearest access-controlled ancestor, the job. -->
-      ${h.checkAnyPermission(it, it.viewPermissions)}
+           makes is made here, against the same nearest access-controlled ancestor, the job.
+           #132: through it, not h, which is only defined inside l:layout (l:view). -->
+      ${it.checkViewPermission()}
       <l:job-subpage>
         <st:include page="_body.jelly"/>
       </l:job-subpage>

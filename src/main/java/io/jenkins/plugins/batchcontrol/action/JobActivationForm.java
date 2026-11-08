@@ -116,6 +116,17 @@ public class JobActivationForm implements Action {
         return new Permission[] {BatchControlPermissions.REQUEST};
     }
 
+    /**
+     * #132: the check of the job sub-page branch of {@code index.jelly}, called before
+     * {@code l:job-subpage}, which takes no permissions attribute: {@link #getViewPermissions()}
+     * on the item, the nearest access-controlled ancestor the classic branch's
+     * {@code l:layout permissions="..."} checks, refused with the same 403. ({@code h} is not
+     * defined above the layout, so {@code h.checkAnyPermission} there checks nothing.)
+     */
+    public void checkViewPermission() {
+        item.checkAnyPermission(getViewPermissions());
+    }
+
     // ---------------------------------------------------------------- view model
 
     /** Whether the job may run on timer and upstream triggers as far as activation is concerned. */

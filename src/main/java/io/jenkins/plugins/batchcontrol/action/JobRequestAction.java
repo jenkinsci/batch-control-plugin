@@ -211,6 +211,19 @@ public class JobRequestAction implements Action {
         return new Permission[] {BatchControlPermissions.REQUEST};
     }
 
+    /**
+     * #132: the check of the request page ({@code index.jelly}), called first in the view, before
+     * anything is written: {@link #getViewPermissions()} on the job, the nearest access-controlled
+     * ancestor {@code l:layout permissions="..."} would check, refused with the same 403.
+     * {@code l:job-subpage} takes no permissions attribute, and the view cannot make the check
+     * through {@code h} above the layout: {@code h} is set by {@code l:view} inside
+     * {@code l:layout}, and JEXL resolves a method call on an undefined variable to {@code null}
+     * without calling anything.
+     */
+    public void checkViewPermission() {
+        job.checkAnyPermission(getViewPermissions());
+    }
+
     // ---------------------------------------------------------------- view model
 
     /**

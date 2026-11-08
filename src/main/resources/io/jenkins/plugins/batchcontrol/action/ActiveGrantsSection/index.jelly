@@ -5,8 +5,9 @@
      array (getViewPermissions, the Grants screen's), after the parent gate
      GrantsSection#getTarget has already checked it. No layout is rendered because nothing is
      shown; no state changes here (revoke is a separate @RequirePOST endpoint). The target is
-     relative, so the context path is kept. -->
+     relative, so the context path is kept. #132: the check goes through it, not h, which is
+     only defined inside l:layout (l:view) and so is undefined in this layout-less view. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
-  ${h.checkAnyPermission(it, it.viewPermissions)}
+  ${it.checkViewPermission()}
   <st:redirect url=".."/>
 </j:jelly>
