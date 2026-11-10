@@ -13,10 +13,21 @@ from lib import Session, close, log, strategy, api, groovy, BASE
 
 res = {}
 APP = "/job/team/job/app-1"
+EXPECTED_CONFIGURE = {
+    "0 before": 403,
+    "1 requested (pending)": 403,
+    "2 approved (window open)": 200,
+    "3 after a Manage Roles save during the window": 200,
+    "4 revoked": 403,
+}
 
 
 def state(tag):
-    res[f"{tag}: requester configure"] = api("requester", APP + "/configure").status_code
+    configure_status = api("requester", APP + "/configure").status_code
+    res[f"{tag}: requester configure"] = configure_status
+    assert configure_status == EXPECTED_CONFIGURE[tag], (
+        f"{tag}: expected requester configure to return {EXPECTED_CONFIGURE[tag]}, got {configure_status}"
+    )
     res[f"{tag}: requester GET app-1"] = api("requester", APP + "/api/json").status_code
     res[f"{tag}: strategy"] = strategy()
 
