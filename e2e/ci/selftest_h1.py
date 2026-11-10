@@ -1000,7 +1000,7 @@ def synthetic():
            "5 global entry removed: nobc GET team/app-1/configure": 403,
            "0 before: strategy": h1.RS_STRATEGY, "1 global assigned: strategy": h1.RS_STRATEGY,
            "2 item roles e2e13-team+team-all assigned: strategy": h1.RS_STRATEGY,
-           "3 e2e13-team unassigned (team-all kept)": h1.RS_STRATEGY,
+           "3 e2e13-team unassigned (team-all kept): strategy": h1.RS_STRATEGY,
            "4 item entry removed": h1.RS_STRATEGY, "5 global entry removed": h1.RS_STRATEGY,
            "nobc rows after reload": 0, "assign GET": 200, "requests": [], "bad": [], "console": []}], {}, "pass", None),
         ("role: grant overlay checks every permission transition", "role/grant_overlay",
