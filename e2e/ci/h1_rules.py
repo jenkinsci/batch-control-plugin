@@ -999,13 +999,17 @@ def judge_role(name, res, ctx=None):
         item_api = res.get("item role API") or {}
         global_body = global_api.get("body") or {}
         item_body = item_api.get("body") or {}
+        global_permissions = global_body.get("permissionIds", {})
+        item_permissions = item_body.get("permissionIds", {})
         global_api_ok = (not api_present or
                          (global_api.get("status") == 200
-                          and global_body.get("permissionIds", {}).get("hudson.model.Hudson.Read") is True))
+                          and set(global_permissions) == {"hudson.model.Hudson.Read"}
+                          and global_permissions.get("hudson.model.Hudson.Read") is True))
         item_api_ok = (not api_present or
                        (item_api.get("status") == 200 and item_body.get("pattern") == "team(/.*)?"
-                        and item_body.get("permissionIds", {}).get("hudson.model.Item.Read") is True
-                        and item_body.get("permissionIds", {}).get("hudson.model.Item.Configure") is True))
+                        and set(item_permissions) == {"hudson.model.Item.Read", "hudson.model.Item.Configure"}
+                        and item_permissions.get("hudson.model.Item.Read") is True
+                        and item_permissions.get("hudson.model.Item.Configure") is True))
         ok = (res.get("manage-roles GET") == 200 and res.get("global role listed") == 1 and res.get("item role listed") == 1
               and res.get("item role after reload") == 1 and res.get("add enabled with invalid pattern") is False
               and "team(/.*)?" in (res.get("server item role") or "") and res.get("strategy") == RS_STRATEGY
