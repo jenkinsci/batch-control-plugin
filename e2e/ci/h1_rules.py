@@ -967,20 +967,58 @@ def judge_role(name, res, ctx=None):
         got = {t: (res.get(f"{t}: nobc GET /"), res.get(f"{t}: nobc GET team/app-1"), res.get(f"{t}: nobc GET team/app-1/configure"))
                for t in ASSIGN_TABLE}
         strat = {res.get(f"{t}: strategy") for t in ASSIGN_TABLE}
-        if got != ASSIGN_TABLE or strat != {RS_STRATEGY} or res.get("nobc rows after reload") != 0:
+        api_expected = {
+            "0 global API": [],
+            "0 item API": [],
+            "1 global API": ["e2e13-global"],
+            "2 item API": ["e2e13-team", "team-all"],
+            "3 item API": ["team-all"],
+            "4 item API": [],
+            "5 global API": [],
+        }
+        # Historical baseline rows predate the REST observations. Keep those rows
+        # replayable, but require the complete API snapshot whenever any API field exists.
+        api_present = any(key in res for key in api_expected)
+        api_got = {key: (res.get(key) or {}).get("roles") for key in api_expected}
+        api_status = {key: (res.get(key) or {}).get("status") for key in api_expected}
+        api_ok = (not api_present or
+                  (api_got == api_expected and all(status == 200 for status in api_status.values())))
+        if got != ASSIGN_TABLE or strat != {RS_STRATEGY} or res.get("nobc rows after reload") != 0 or not api_ok:
             j.fail("assign", {"table": got, "expected": ASSIGN_TABLE, "strategy": sorted(map(str, strat)),
-                              "rows after reload": res.get("nobc rows after reload")})
+                              "rows after reload": res.get("nobc rows after reload"),
+                              "role-strategy API roles": api_got, "expected API roles": api_expected,
+                              "role-strategy API status": api_status})
         if res.get("assign GET") != 200 or bad_req() or res.get("bad"):
             j.fail("assign-requests", {"assign GET": res.get("assign GET"), "bad requests": bad_req(), "bad": res.get("bad")})
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/"})
     elif name == "manage_roles":
+        # The checked-in historical fixture has no REST snapshots; enforce them on
+        # current runs while allowing that pre-assertion data to be replayed.
+        api_present = "global role API" in res or "item role API" in res
+        global_api = res.get("global role API") or {}
+        item_api = res.get("item role API") or {}
+        global_body = global_api.get("body") or {}
+        item_body = item_api.get("body") or {}
+        global_permissions = global_body.get("permissionIds", {})
+        item_permissions = item_body.get("permissionIds", {})
+        global_api_ok = (not api_present or
+                         (global_api.get("status") == 200
+                          and set(global_permissions) == {"hudson.model.Hudson.Read"}
+                          and global_permissions.get("hudson.model.Hudson.Read") is True))
+        item_api_ok = (not api_present or
+                       (item_api.get("status") == 200 and item_body.get("pattern") == "team(/.*)?"
+                        and set(item_permissions) == {"hudson.model.Item.Read", "hudson.model.Item.Configure"}
+                        and item_permissions.get("hudson.model.Item.Read") is True
+                        and item_permissions.get("hudson.model.Item.Configure") is True))
         ok = (res.get("manage-roles GET") == 200 and res.get("global role listed") == 1 and res.get("item role listed") == 1
               and res.get("item role after reload") == 1 and res.get("add enabled with invalid pattern") is False
-              and "team(/.*)?" in (res.get("server item role") or "") and res.get("strategy") == RS_STRATEGY)
+              and "team(/.*)?" in (res.get("server item role") or "") and res.get("strategy") == RS_STRATEGY
+              and global_api_ok and item_api_ok)
         if not ok or bad_req() or res.get("bad"):
             j.fail("manage", {k: res.get(k) for k in ("manage-roles GET", "global role listed", "item role listed",
                                                       "item role after reload", "add enabled with invalid pattern",
-                                                      "server item role", "strategy", "bad")} | {"bad requests": bad_req()})
+                                                      "server item role", "strategy", "bad", "global role API", "item role API")}
+                   | {"bad requests": bad_req()})
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/manage-roles"})
     elif name == "manage_edit":
         manage_edit(j, res, bad_req)

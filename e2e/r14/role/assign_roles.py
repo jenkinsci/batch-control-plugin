@@ -7,12 +7,24 @@ unassign the item role, delete the nobc entry. After every step nobc's effective
 over REST (basic auth) and the installed strategy class is checked.
 H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "assign_roles"); a finding prints a "FAIL role ..." line.
 """
+import json
 import re
 import lib
 from lib import Session, close, log, strategy, api, BASE
 
 res = {}
 reqs = []
+
+
+def role_assignments(role_type):
+    """Read SID-to-role assignments through role-strategy's REST API."""
+    response = api("admin", f"/role-strategy/strategy/getRoleAssignments?type={role_type}")
+    try:
+        entries = response.json() if response.status_code == 200 else []
+    except ValueError:
+        entries = []
+    user = next((entry for entry in entries if entry.get("name") == "nobc" and entry.get("type") == "USER"), None)
+    return {"status": response.status_code, "roles": sorted(user.get("roles", [])) if user else []}
 
 
 def access(tag):
@@ -23,6 +35,8 @@ def access(tag):
 
 
 access("0 before")
+res["0 global API"] = role_assignments("globalRoles")
+res["0 item API"] = role_assignments("projectRoles")
 s = Session("admin")
 s.page.on("response", lambda r: reqs.append(f"{r.status} {r.request.method} {r.url.replace(BASE, '')}")
           if "/static/" not in r.url and "/adjuncts/" not in r.url else None)
@@ -78,6 +92,7 @@ wait_post()
 s.shot("#main-panel", "RS-3-07-nobc-assigned-global")
 res["row nobc buttons"] = row("nobc").locator("button").evaluate_all("bs => bs.map(b => b.getAttribute('aria-label') || b.title || b.innerText)")
 access("1 global assigned")
+res["1 global API"] = role_assignments("globalRoles")
 
 # --- R13-4: item role assign, unassign (edit + Save), remove entry, delete ---
 tab("Item roles")
@@ -92,6 +107,7 @@ d.get_by_role("button", name="Add").click()
 wait_post()
 s.shot("#main-panel", "RS-4-02-nobc-assigned-item")
 access("2 item roles e2e13-team+team-all assigned")
+res["2 item API"] = role_assignments("projectRoles")
 
 
 def remove_entry(tag):
@@ -114,6 +130,7 @@ d.get_by_role("button", name="Save").click()
 wait_post()
 s.shot("#main-panel", "RS-4-04-after-unassign")
 access("3 e2e13-team unassigned (team-all kept)")
+res["3 item API"] = role_assignments("projectRoles")
 
 # the edit dialog refuses zero roles; removing the entry is the way to drop the last one
 row("nobc").locator("button[aria-label='Edit roles']").click()
@@ -126,6 +143,7 @@ d.locator(".jenkins-dialog__title__close-button").click()
 s.page.wait_for_timeout(300)
 remove_entry("RS-4-06-remove-item-entry")
 access("4 item entry removed")
+res["4 item API"] = role_assignments("projectRoles")
 
 # delete the global entry
 tab("Global roles")
@@ -133,6 +151,7 @@ remove_entry("RS-4-07-remove-global-entry")
 s.shot("#main-panel", "RS-4-08-after-delete")
 res["nobc rows after delete"] = s.page.locator("#main-panel").get_by_text(re.compile(r"\(nobc\)")).count()
 access("5 global entry removed")
+res["5 global API"] = role_assignments("globalRoles")
 
 # reload persisted
 s.go("/manage/role-strategy/")

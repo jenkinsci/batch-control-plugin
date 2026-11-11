@@ -50,7 +50,7 @@ jobs:
   # Lightweight gate: does this event touch an input of the suite? Output run=true|false.
   changes:
     name: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       run: ${{ steps.diff.outputs.run }}
@@ -96,7 +96,7 @@ jobs:
     name: e2e build
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -126,7 +126,7 @@ jobs:
     name: e2e groups
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.groups.outputs.matrix }}
@@ -144,7 +144,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.label }})
     needs: [build, groups]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -223,7 +223,7 @@ jobs:
     name: e2e coverage
     needs: [build, e2e]
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       # The full history, so that the merge base with the base commit is present.
@@ -317,7 +317,7 @@ jobs:
     name: e2e result
     needs: [changes, build, groups, e2e, coverage]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Verdict

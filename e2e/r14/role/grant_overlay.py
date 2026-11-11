@@ -13,8 +13,6 @@ from lib import Session, close, log, strategy, api, groovy, BASE
 
 res = {}
 APP = "/job/team/job/app-1"
-
-
 def state(tag):
     res[f"{tag}: requester configure"] = api("requester", APP + "/configure").status_code
     res[f"{tag}: requester GET app-1"] = api("requester", APP + "/api/json").status_code
