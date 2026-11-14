@@ -1,26 +1,45 @@
 package io.jenkins.plugins.batchcontrol;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
+import hudson.matrix.AxisList;
+import hudson.matrix.MatrixProject;
+import hudson.matrix.TextAxis;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
+import hudson.model.TopLevelItem;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.security.AuthorizationMatrixProperty;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
@@ -48,6 +67,9 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.assertSuccess;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.decideGrant;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.excerpt;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.grantRequestIds;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrant;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrantOk;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -64,7 +86,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * pages link to the prefill URL. Matrix rows T-08-118 .. T-08-122 and T-08-124 (note 260); the
  * job and folder entry points are T-UI-10/15, T-UI-98 and T-UI-112, the move refusal page T-SEC-72.
  * Note 262 adds the item-group notice on the approval page (T-08-138, D-71a) and the kind's icon
- * in the item check and the lists (T-08-139/140, spec-review-S6 M-1).
+ * in the item check and the lists (T-08-139/140, spec-review-S6 M-1). Issue #8 adds the item
+ * field's suggestions, {@code GET batch-control/grants/autoCompleteScopeFullName} (T-08-262 ..
+ * T-08-265, T-08-299 .. T-08-303, note 373).
  *
  * <p>Users: g1 (RequestGrant), n1 (ViewHistory only: a Batch Control user without the permission
  * to request), a1 (the approver, no RequestGrant), p0 (no Batch Control permission), u3
@@ -296,6 +320,172 @@ public class ItemScopeUiTest {
             assertTrue(markup.contains("autoCompleteScopeFullName"), path + ": the item field must be wired to the suggestions: " + markup);
             assertTrue(markup.contains("checkScopeFullName"), path + ": guard: the item field keeps its name check: " + markup);
         }
+    }
+
+    /**
+     * T-08-299 (issue #8, SPEC 8 "names that start with the typed text first and then names that
+     * contain it, ignoring case"): with the jobs {@code x-job} and {@code XL-report} added, typing
+     * {@code x} offers exactly four names: the two that start with it ({@code XL-report} in the other
+     * case) before {@code batch-x} and {@code pipe-x}, which only contain it. Alphabetical order gets
+     * this wrong under either case rule (case-sensitive: {@code XL-report, batch-x, pipe-x, x-job};
+     * ignoring case: {@code batch-x, pipe-x, x-job, XL-report}). Typing {@code X} gives the same groups.
+     * The order inside each group is not pinned (SPEC fixes none). {@code xl} offers {@code XL-report}.
+     */
+    @Test
+    public void t_08_299_namesStartingWithTheTextComeBeforeNamesContainingIt() throws Exception {
+        j.createFreeStyleProject("x-job");
+        j.createFreeStyleProject("XL-report");
+        Set<String> starting = Set.of("x-job", "XL-report");
+        Set<String> containing = Set.of("batch-x", "pipe-x");
+
+        for (String typed : new String[] {"x", "X"}) {
+            List<String> offered = suggestions("g1", typed);
+            assertEquals(4, offered.size(), "'" + typed + "' must offer the four readable names that contain it: " + offered);
+            assertEquals(starting, new HashSet<>(offered.subList(0, 2)), "'" + typed + "': the names that start with the typed"
+                    + " text, in any case, must come first: " + offered);
+            assertEquals(containing, new HashSet<>(offered.subList(2, 4)), "'" + typed + "': the names that only contain the"
+                    + " typed text must come after them: " + offered);
+        }
+        assertEquals(List.of("XL-report"), suggestions("g1", "xl"), "a name starting with the typed text in another case is offered");
+    }
+
+    /**
+     * T-08-300 (issue #8, SPEC 8 "names that start with the typed text first ..., at most 20"): the
+     * 20 names offered are the first 20 of that order, so a name that starts with the typed text is
+     * not left out for names that only contain it. 25 jobs {@code a-zz-01} .. {@code a-zz-25} contain
+     * {@code zz}; {@code zz-top}, created last, starts with it and sorts after them: typing {@code zz}
+     * offers exactly 20 names, {@code zz-top} first and 19 {@code a-zz-*} jobs after it. Guard:
+     * {@code zz-t} offers {@code zz-top} alone.
+     */
+    @Test
+    public void t_08_300_theTwentyNamesKeepTheNamesThatStartWithTheText() throws Exception {
+        for (int i = 1; i <= 25; i++) {
+            j.createFreeStyleProject(String.format("a-zz-%02d", i));
+        }
+        j.createFreeStyleProject("zz-top");
+
+        List<String> offered = suggestions("g1", "zz");
+        assertEquals(20, offered.size(), "at most 20 names, and 26 match: " + offered);
+        assertEquals("zz-top", offered.get(0), "the name that starts with the typed text must be offered first, not cut by the"
+                + " limit: " + offered);
+        for (String name : offered.subList(1, 20)) {
+            assertTrue(name.startsWith("a-zz-"), "the other 19 must be names that contain the typed text: " + offered);
+        }
+        assertEquals(List.of("zz-top"), suggestions("g1", "zz-t"), "guard: zz-top exists and g1 may read it");
+    }
+
+    /**
+     * T-08-301 (issue #8, SPEC 8 "jobs and folders the requester may read (Item/Read)", SPEC 2): an
+     * item g1 may only discover is not offered. The job {@code vis-discover} and the folder
+     * {@code vis-folder} each carry a non-inheriting authorization property that gives the
+     * administrator Item/Read and g1 only Item/Discover (premise: g1 discovers both and reads
+     * neither); {@code vis-read} inherits g1's Item/Read. g1 typing {@code vis} is offered
+     * {@code vis-read} only, and the exact names of the other two offer nothing. Guard: the
+     * administrator is offered all three.
+     */
+    @Test
+    public void t_08_301_anItemTheRequesterMayOnlyDiscoverIsNotOffered() throws Exception {
+        FreeStyleProject readable = j.createFreeStyleProject("vis-read");
+        FreeStyleProject job = j.createFreeStyleProject("vis-discover");
+        AuthorizationMatrixProperty onJob = new AuthorizationMatrixProperty(new HashMap<>(), new NonInheritingStrategy());
+        onJob.add(Item.READ, PermissionEntry.user("admin"));
+        onJob.add(Item.DISCOVER, PermissionEntry.user("g1"));
+        job.addProperty(onJob);
+        Folder folder = j.jenkins.createProject(Folder.class, "vis-folder");
+        com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty onFolder =
+                new com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty(new HashMap<Permission, Set<String>>());
+        onFolder.setInheritanceStrategy(new NonInheritingStrategy());
+        onFolder.add(Item.READ, PermissionEntry.user("admin"));
+        onFolder.add(Item.DISCOVER, PermissionEntry.user("g1"));
+        folder.addProperty(onFolder);
+        for (Item item : new Item[] {job, folder}) {
+            assertTrue(can("g1", item, Item.DISCOVER), "premise: g1 may discover " + item.getFullName());
+            assertFalse(can("g1", item, Item.READ), "premise: g1 may not read " + item.getFullName());
+        }
+        assertTrue(can("g1", readable, Item.READ), "premise: g1 may read vis-read");
+
+        assertEquals(List.of("vis-read"), suggestions("g1", "vis"), "only the item g1 may read is offered");
+        assertEquals(List.of(), suggestions("g1", "vis-discover"), "a job g1 may only discover is not offered, not even by its name");
+        assertEquals(List.of(), suggestions("g1", "vis-folder"), "a folder g1 may only discover is not offered, not even by its name");
+        assertEquals(Set.of("vis-read", "vis-discover", "vis-folder"), new HashSet<>(suggestions("admin", "vis")),
+                "guard: the administrator, who may read all three, is offered them");
+    }
+
+    /**
+     * T-08-302 (issue #8, SPEC 8 "Sub-items of a job (D-71a) are not offered"): the configurations
+     * of the multi-configuration project {@code mx} (axis X=a,b) are not offered, although g1 may
+     * read them (premise: {@code mx/X=a} and {@code mx/X=b} exist, are not top-level items and are
+     * readable by g1). g1 typing {@code mx} is offered {@code mx} alone (guard: the project itself
+     * is offered); {@code X=} and {@code mx/} offer nothing, to the administrator neither. Maven
+     * modules, the other kind of sub-item, are not covered: the Maven plugin is not a test
+     * dependency (note 260).
+     */
+    @Test
+    public void t_08_302_configurationsOfAMultiConfigurationProjectAreNotOffered() throws Exception {
+        MatrixProject mx = j.jenkins.createProject(MatrixProject.class, "mx");
+        mx.setAxes(new AxisList(new TextAxis("X", "a", "b")));
+        for (String name : new String[] {"mx/X=a", "mx/X=b"}) {
+            Item configuration = j.jenkins.getItemByFullName(name);
+            assertNotNull(configuration, "fixture: mx must have the configuration " + name);
+            assertFalse(configuration instanceof TopLevelItem, "fixture: " + name + " is a sub-item of the job");
+            assertTrue(can("g1", configuration, Item.READ), "premise: g1 may read " + name + ", so only the sub-item rule keeps it out");
+        }
+
+        assertEquals(List.of("mx"), suggestions("g1", "mx"), "the project is offered, its configurations are not");
+        assertEquals(List.of(), suggestions("g1", "X="), "a configuration must not be offered");
+        assertEquals(List.of(), suggestions("g1", "mx/"), "nothing below the job may be offered");
+        assertEquals(List.of(), suggestions("admin", "X="), "a configuration is not offered to the administrator either");
+    }
+
+    /**
+     * T-08-303 (issue #8, SPEC 8 "The suggestion request (GET) ... changes nothing and writes no
+     * record"; CLAUDE.md: no state change through GET; LIMITATIONS 29): with g1's pending CONFIGURE
+     * request on {@code batch-x} stored and after g1 has opened the grants page once, a round of
+     * suggestion requests leaves every file under {@code $JENKINS_HOME/batch-control/}
+     * byte-identical, the month's change records and the grant requests unchanged. The round: g1
+     * asks for {@code batch}, {@code secret}, an empty value, {@code no-such-item}, and once with the
+     * fields of the request form ({@code scopeFullName}, {@code actions}, {@code durationMinutes},
+     * {@code reason}, {@code approvers}); n1, a1 and p0 ask for {@code batch} and are refused. Run
+     * with change control on, then off (run control on, as T-08-260), where a window request is
+     * refused with a GRANT_REQUEST_BLOCKED record. Guards: on, g1's real {@code POST grants/create}
+     * adds one grant request and changes the store; off, the same POST adds one
+     * GRANT_REQUEST_BLOCKED record and changes the store.
+     */
+    @Test
+    public void t_08_303_suggestionRequestChangesNothingAndWritesNoRecord() throws Exception {
+        String pending = request("batch-x", GrantAction.CONFIGURE).getId();
+        HtmlPage warmUp = UsabilityFixtures.htmlPage(j, "g1", "batch-control/grants/");
+        assertEquals(200, warmUp.getWebResponse().getStatusCode(), "fixture: g1 opens the grants page");
+
+        Map<String, String> store = storeDigest();
+        List<String> changes = changeRecords();
+        Set<String> requests = grantRequestIds();
+        assertTrue(requests.contains(pending) && !store.isEmpty(), "premise: the store holds g1's pending request");
+        askForSuggestions(true);
+        assertNothingChanged("change control on", store, changes, requests);
+
+        String created = submitGrantOk(j, "g1", "pipe-x", List.of("CONFIGURE"), 30, "guard: a real request", null, "a1");
+        assertTrue(grantRequestIds().contains(created), "guard: the real request is stored");
+        assertFalse(store.equals(storeDigest()), "guard: a real request changes the store, so the comparison can see a change");
+
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setRunControlEnabled(true);
+        cfg.setChangeControlEnabled(false);
+        cfg.save();
+        assertFalse(BatchControlGlobalConfiguration.get().isChangeControlEnabled(), "premise: change control is off");
+        store = storeDigest();
+        changes = changeRecords();
+        requests = grantRequestIds();
+        askForSuggestions(false);
+        assertNothingChanged("change control off", store, changes, requests);
+
+        int blocked = ApproverFormFixtures.records(ChangeType.GRANT_REQUEST_BLOCKED).size();
+        WebResponse refused = submitGrant(j, "g1", "pipe-x", List.of("CONFIGURE"), 30, "guard: refused while off", null, "a1");
+        assertTrue(refused.getStatusCode() >= 400, "guard: a window request while change control is off is refused: "
+                + excerpt(refused.getContentAsString()));
+        assertEquals(blocked + 1, ApproverFormFixtures.records(ChangeType.GRANT_REQUEST_BLOCKED).size(),
+                "guard: the refused POST writes one GRANT_REQUEST_BLOCKED record, so the record check can see one");
+        assertFalse(store.equals(storeDigest()), "guard: the refused POST's record changes the store");
     }
 
     /**
@@ -562,6 +752,79 @@ public class ItemScopeUiTest {
             names.add(m.group(1));
         }
         return names;
+    }
+
+    /**
+     * T-08-303's round of suggestion requests: g1's (200 with change control on, below 500 with it
+     * off) and the refused n1, a1 (403) and p0 (404; with change control off only below 500).
+     */
+    private void askForSuggestions(boolean changeControlOn) throws Exception {
+        String formFields = "?value=batch-x&scopeFullName=batch-x&actions=CONFIGURE&durationMinutes=30"
+                + "&reason=sneaked+through+a+GET&approvers=a1";
+        for (String query : new String[] {"?value=batch", "?value=secret", "?value=", "?value=no-such-item", formFields}) {
+            WebResponse r = ApproverFormFixtures.get(j, "g1", AUTOCOMPLETE + query);
+            int code = r.getStatusCode();
+            assertTrue(changeControlOn ? code == 200 : code < 500, "g1's suggestion request " + query + " (change control "
+                    + (changeControlOn ? "on" : "off") + ") answered " + code + ": " + excerpt(r.getContentAsString()));
+        }
+        for (String[] caller : new String[][] {{"n1", "403"}, {"a1", "403"}, {"p0", "404"}}) {
+            WebResponse r = ApproverFormFixtures.get(j, caller[0], AUTOCOMPLETE + "?value=batch");
+            int code = r.getStatusCode();
+            assertTrue(changeControlOn ? code == Integer.parseInt(caller[1]) : code < 500, caller[0] + "'s suggestion request"
+                    + " (change control " + (changeControlOn ? "on" : "off") + ") answered " + code + ": "
+                    + excerpt(r.getContentAsString()));
+        }
+    }
+
+    /** No file of the store, no change record of the month and no grant request differs from before. */
+    private void assertNothingChanged(String when, Map<String, String> store, List<String> changes, Set<String> requests)
+            throws Exception {
+        List<String> newRecords = new ArrayList<>(changeRecords());
+        for (String rec : changes) {
+            newRecords.remove(rec);
+        }
+        assertEquals(changes, changeRecords(), when + ": a suggestion request must write no record; new records: " + newRecords);
+        assertEquals(requests, grantRequestIds(), when + ": a suggestion request must store no grant request");
+        Map<String, String> now = storeDigest();
+        Set<String> differing = new java.util.TreeSet<>();
+        for (String path : now.keySet()) {
+            if (!now.get(path).equals(store.get(path))) {
+                differing.add(path);
+            }
+        }
+        for (String path : store.keySet()) {
+            if (!now.containsKey(path)) {
+                differing.add(path + " (deleted)");
+            }
+        }
+        assertTrue(differing.isEmpty(), when + ": a suggestion request must change nothing in the store; changed: " + differing);
+    }
+
+    /** Every file under {@code $JENKINS_HOME/batch-control/} (ARCHITECTURE 5): relative path to the SHA-256 of its bytes. */
+    private Map<String, String> storeDigest() throws Exception {
+        Path root = j.jenkins.getRootDir().toPath().resolve("batch-control");
+        Map<String, String> out = new TreeMap<>();
+        if (!Files.isDirectory(root)) {
+            return out;
+        }
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(root)) {
+            files = walk.filter(Files::isRegularFile).toList();
+        }
+        for (Path file : files) {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file));
+            out.put(root.relativize(file).toString().replace('\\', '/'), HexFormat.of().formatHex(digest));
+        }
+        return out;
+    }
+
+    /** The change records of the current month, each as id, type, user and target. */
+    private static List<String> changeRecords() {
+        List<String> out = new ArrayList<>();
+        for (ChangeRecord rec : FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock()))) {
+            out.add(rec.getId() + " " + rec.getType() + " user=" + rec.getUser() + " target=" + rec.getTarget());
+        }
+        return out;
     }
 
     /** The FormValidation kind of a validation answer ({@code <div class=ok|warning|error>}), or "". */
