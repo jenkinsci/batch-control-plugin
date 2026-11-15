@@ -7,7 +7,6 @@ unassign the item role, delete the nobc entry. After every step nobc's effective
 over REST (basic auth) and the installed strategy class is checked.
 H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_role "assign_roles"); a finding prints a "FAIL role ..." line.
 """
-import json
 import re
 import lib
 from lib import Session, close, log, strategy, api, BASE
