@@ -96,6 +96,20 @@ def m=s.getRoleMap(com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Projec
 def r=m.getRole('e2e13-team'); return r==null?'none':(r.pattern.pattern()+' '+r.permissions*.id.sort())""")
 res["server global role"] = groovy("""def s=jenkins.model.Jenkins.get().authorizationStrategy
 def r=s.getRoleMap(com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType.Global).getRole('e2e13-global'); return r==null?'none':r.permissions*.id.sort()""")
+
+
+def role_api(role_type, role_name):
+    """Read the saved role through role-strategy's public REST API, independently of the page."""
+    response = lib.api("admin", f"/role-strategy/strategy/getRole?type={role_type}&roleName={role_name}")
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    return {"status": response.status_code, "body": body}
+
+
+res["global role API"] = role_api("globalRoles", "e2e13-global")
+res["item role API"] = role_api("projectRoles", "e2e13-team")
 for k, v in res.items():
     print(k, "=>", v)
 log("manage_roles", res)
