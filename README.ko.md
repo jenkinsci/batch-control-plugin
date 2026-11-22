@@ -3,24 +3,42 @@
 # Batch Control
 
 CI 서버가 아니라 **배치 실행 관리 도구**로 운영되는 Jenkins 인스턴스를 위한 실행 승인, 기간
-제한 변경 권한, 추가 전용(append-only) 감사 이력.
+제한 변경 권한, 빌드와 따로 보관되는 감사 이력.
 
 야간·주기 운영 작업을 Jenkins로 돌리고, 잡을 손으로 시작하거나 잡이 하는 일을 바꾸는 것이 운영
 변경인 팀을 위한 플러그인입니다. 설치만으로 달라지는 것은 없습니다. 두 통제 모두 관리자가 켤
 때까지 꺼져 있습니다.
+
+## 동작 모습
+
+**요청자 화면:** 보호된 잡을 손으로 빌드하면 거부되고 같은 값이 사유와 함께 실행 요청으로
+올라가며, approver-1이 승인하면 그 값 그대로 빌드가 한 번 실행됩니다.
+
+![요청자 화면을 녹화한 애니메이션. requester로 로그인한 상태이고, 위쪽 단계 표시줄에 Press Build, Refused, Send request, Approved, runs once가 차례로 켜집니다. 요청자가 batch » daily-settlement의 빌드 양식에 BUSINESS_DATE 2026-10-08, SCOPE ALL을 넣고 DRY_RUN은 체크하지 않은 채 Build를 누릅니다. 빌드는 시작되지 않고, 그 사실을 알리는 안내가 테두리로 강조된 Request Run 양식이 같은 값이 채워진 채 열립니다. 요청자는 사유를 적고 approver-1이 체크된 상태로 제출합니다. approver-1이 코멘트를 달아 승인하자 요청은 Executed 상태가 되어 실행 #3과 연결되고, 그 콘솔에는 승인된 요청 정보와 함께 business date 2026-10-08, scope ALL, dry run false로 정산하는 출력이 찍힙니다.](docs/images/flow-requester.gif)
+
+**결재자 화면:** 대기 중인 실행 요청의 사유와 파라미터를 제출된 그대로 확인하고 코멘트를 달아
+승인하면, 그 빌드가 Run Dashboard에 실행 원인 *Approved request*로 나타납니다.
+
+![결재자 화면을 녹화한 애니메이션. approver-1로 로그인한 상태이고, 위쪽 단계 표시줄에 Request arrives, Check the values, Approve, Runs once, logged가 차례로 켜집니다. Run Requests에는 requester가 올린 batch/daily-settlement의 대기 중인 요청 한 건이 있습니다. 요청 화면에서는 사유 Vendor file came late와 파라미터 BUSINESS_DATE 2026-10-08, SCOPE ALL, DRY_RUN false가 각각 테두리로 강조되어 있고, 바로 아래에 Decision 영역이 이어집니다. 결재자가 코멘트 Vendor confirmed, go ahead를 입력하고 Approve를 누르면 상태가 Approved, waiting to run으로 바뀌고 결정한 사람으로 approver-1이 표시됩니다. 이어서 Dashboard에 batch/daily-settlement #3이 Success, 실행 원인 Approved request, 사용자 requester, 같은 파라미터 값 세 개와 함께 나타납니다.](docs/images/flow-approver.gif)
+
+두 녹화 모두 Docker Compose 데모로 찍었습니다. [`demo/`](demo/README.md)의 데모로 직접 해 볼
+수 있습니다.
 
 ## 주요 기능
 
 - **실행 승인.** 사람이 보호된 잡을 수동으로 실행하면(Build Now, REST, CLI, Replay) 큐 진입
   시점에 거부되고 실행 요청이 됩니다. 지정된 결재자만 결정할 수 있고, 승인된 빌드는 결재자가 본
   파라미터를 그대로 받아 한 번만 실행됩니다.
-- **활성화.** 실행 통제가 켜진 동안 만든 잡은 결재자가 활성화할 때까지 타이머, 업스트림 트리거,
-  SCM 트리거, 웹훅으로 실행되지 않습니다. 기존 잡은 일정대로 계속 실행됩니다.
+- **활성화.** 실행 통제가 켜진 동안 만든 잡은 **Require approval to run**,
+  **Block cron (timer) triggers**, **Block upstream triggers**가 체크된 채로 시작합니다.
+  결재자가 활성화할 때까지 타이머, 업스트림 트리거, SCM 트리거, 웹훅으로 실행되지 않으며,
+  타이머와 업스트림 트리거는 해당 스위치까지 해제해야 실행됩니다. 기존 잡은 일정대로 계속
+  실행됩니다.
 - **권한 창.** 상시 권한이 없는 사용자가 잡 하나나 폴더 하나에 대해 `CREATE`, `CONFIGURE`,
   `DELETE`를 제한된 시간 동안 요청합니다. 창은 스스로 닫힙니다.
 - **빌드와 무관한 감사 이력.** 실행, 요청, 결정, diff가 붙은 설정 변경, 실패가
-  `$JENKINS_HOME/batch-control/` 아래에 추가 전용으로 보관되며, 이력 화면과 CSV 내보내기를
-  제공합니다.
+  `$JENKINS_HOME/batch-control/` 아래에 보관되며, 이력 화면과 CSV 내보내기를 제공합니다.
+  보관 기간이 끝나기 전에는 수정하거나 삭제할 방법이 없습니다.
 - **인시던트.** 실패하거나 불안정한 실행은(기본값이며, 설정에서 중단된 실행을 추가할 수
   있습니다) 콘솔 마지막 100줄과 함께 인시던트(오류 건)를 엽니다. 확인, 해결, 요청을 통한
   재실행으로 처리합니다.
