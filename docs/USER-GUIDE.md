@@ -588,7 +588,10 @@ saved on jobs, folders and agents. After converting to **Batch Control:
 Project-based Matrix Authorization Strategy**, which grants need, all of them
 take effect, stale ones included, and anyone with `Item/Configure` on an item
 can edit its permissions. The monitor's **Install the Batch Control variant**
-button, the explicit step, says the same. Review the properties first.
+button, the explicit step, says the same. Review the properties first. If you
+press the monitor's **Dismiss** on Manage Jenkins it stays hidden for good;
+tick it again under Manage Jenkins › System › Administrative monitors to bring
+it back ([Limitations](LIMITATIONS.md#the-authorization-strategy) item 52).
 
 ### A protected job refused at queue entry fails its caller
 
