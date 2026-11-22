@@ -3,7 +3,9 @@
 This guide is the detailed reference for Batch Control. The
 [README](../README.md) has the overview, requirements, installation and a quick
 start; the complete list of known limitations is in
-[`LIMITATIONS.md`](LIMITATIONS.md). Identifiers such as `D-37` (a design
+[`LIMITATIONS.md`](LIMITATIONS.md). To try the plugin on a throwaway local
+Jenkins first, use the Docker Compose demo described in
+[`demo/README.md`](../demo/README.md). Identifiers such as `D-37` (a design
 decision) or "SPEC item 3" let the maintainer trace a statement; you do not need
 them to use the plugin. They point into [`SPEC.md`](SPEC.md),
 [`DECISIONS.md`](DECISIONS.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md), which

@@ -105,6 +105,15 @@ Install from **Manage Jenkins → Plugins → Available plugins** (search for
 Building needs Maven and JDK 21 or 25: `mvn clean package` produces
 `target/batch-control.hpi`.
 
+## Try it locally
+
+The Docker Compose demo in `demo/` starts a throwaway Jenkins with Batch Control
+installed, both controls on, three users and two protected jobs. From the
+repository root, run `cd demo && docker compose up` (the first start builds the
+image in a few minutes), then open <http://localhost:8080/>. It is for local
+evaluation only: Jenkins listens on 127.0.0.1 and the passwords are fixed. The
+logins and a walkthrough are in [`demo/README.md`](demo/README.md).
+
 ## Quick start
 
 1. In **Manage Jenkins → System → Batch Control**, check **Enable run control**
