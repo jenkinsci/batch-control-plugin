@@ -13,7 +13,7 @@
         <th style="text-align: left; width: 12rem;">State</th>
         <td>
           <j:choose>
-            <j:when test="${it.carrier != null and it.carrierReadable}">Carried by ${it.carrier.fullDisplayName}</j:when>
+            <j:when test="${it.carrier != null and it.carrierReadable}">Carried by <a href="${rootURL}/${it.carrier.url}">${it.carrier.fullDisplayName}</a></j:when>
             <j:when test="${it.carrier != null}">Managed by an item you cannot see</j:when>
             <j:when test="${it.activated}">Activated</j:when>
             <j:when test="${it.held}">On hold</j:when>
