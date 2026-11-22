@@ -349,6 +349,20 @@ newer sections in English.
     contained that class, so only development and test instances can be
     affected (D-35e).
 
+<!-- Item 52 was added after 46 and sits here by topic. The comment ends the list so that it renders as 52, not 46. -->
+
+52. **Dismiss on the `batch-control-strategy` administrative monitor hides it
+    for good.** Core's **Dismiss** button on Manage Jenkins persists the
+    dismissal in `config.xml` (`disabledAdministrativeMonitors`), so the
+    monitor never shows there again — including its **Install the Batch
+    Control variant** button and its warnings about builds running as SYSTEM
+    and about items changed under a permission window. The same findings are
+    still listed in the "Administrator checks" section of the Batch Control
+    overview (D-86), so dismissing loses only the Manage Jenkins reminder,
+    not the information. To bring the monitor back on a current Jenkins
+    (checked against core 2.568.3): **Manage Jenkins › System › Administrative
+    monitors**, tick `batch-control-strategy`, and save.
+
 ## Automation and generated jobs
 
 Read this section before enabling run control on an instance that generates jobs
