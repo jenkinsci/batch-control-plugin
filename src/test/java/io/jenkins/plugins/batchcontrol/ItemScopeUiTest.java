@@ -270,9 +270,9 @@ public class ItemScopeUiTest {
 
     /**
      * T-08-263 (issue #8): at most 20 names are offered, so a Jenkins with many items does not answer
-     * a keystroke with its whole tree, and the list is in a stable order. 25 jobs {@code many-01} ..
-     * {@code many-25} are offered as the first 20 of them for {@code many}. Guard: a more specific
-     * {@code many-25} still finds the one beyond the first 20.
+     * a keystroke with its whole tree, and the list is in alphabetical order (SPEC 8). 25 jobs
+     * {@code many-01} .. {@code many-25} are offered as the first 20 of them for {@code many}. Guard:
+     * a more specific {@code many-25} still finds the one beyond the first 20.
      */
     @Test
     public void t_08_263_autoCompleteOffersAtMostTwentyNames() throws Exception {
@@ -324,38 +324,37 @@ public class ItemScopeUiTest {
 
     /**
      * T-08-299 (issue #8, SPEC 8 "names that start with the typed text first and then names that
-     * contain it, ignoring case"): with the jobs {@code x-job} and {@code XL-report} added, typing
-     * {@code x} offers exactly four names: the two that start with it ({@code XL-report} in the other
-     * case) before {@code batch-x} and {@code pipe-x}, which only contain it. Alphabetical order gets
-     * this wrong under either case rule (case-sensitive: {@code XL-report, batch-x, pipe-x, x-job};
-     * ignoring case: {@code batch-x, pipe-x, x-job, XL-report}). Typing {@code X} gives the same groups.
-     * The order inside each group is not pinned (SPEC fixes none). {@code xl} offers {@code XL-report}.
+     * contain it, each group in alphabetical order, ignoring case"): with the jobs {@code x-job},
+     * {@code XL-report} and {@code Max-x} added ({@code Max-x} last), typing {@code x} offers exactly
+     * {@code x-job, XL-report, batch-x, Max-x, pipe-x}: the two that start with it ({@code XL-report}
+     * in the other case), then the three that only contain it, each group in alphabetical order
+     * ignoring case. A case-sensitive sort gets both groups wrong ({@code XL-report} before
+     * {@code x-job}, {@code Max-x} before {@code batch-x}); creation order gets the second wrong
+     * ({@code Max-x} last); alphabetical order without the groups gets the groups wrong (under either
+     * case rule). Typing {@code X} gives the same list. {@code xl} offers {@code XL-report}.
      */
     @Test
     public void t_08_299_namesStartingWithTheTextComeBeforeNamesContainingIt() throws Exception {
         j.createFreeStyleProject("x-job");
         j.createFreeStyleProject("XL-report");
-        Set<String> starting = Set.of("x-job", "XL-report");
-        Set<String> containing = Set.of("batch-x", "pipe-x");
+        j.createFreeStyleProject("Max-x");
+        List<String> expected = List.of("x-job", "XL-report", "batch-x", "Max-x", "pipe-x");
 
         for (String typed : new String[] {"x", "X"}) {
-            List<String> offered = suggestions("g1", typed);
-            assertEquals(4, offered.size(), "'" + typed + "' must offer the four readable names that contain it: " + offered);
-            assertEquals(starting, new HashSet<>(offered.subList(0, 2)), "'" + typed + "': the names that start with the typed"
-                    + " text, in any case, must come first: " + offered);
-            assertEquals(containing, new HashSet<>(offered.subList(2, 4)), "'" + typed + "': the names that only contain the"
-                    + " typed text must come after them: " + offered);
+            assertEquals(expected, suggestions("g1", typed), "'" + typed + "': the names that start with the typed text"
+                    + " first, then the names that only contain it, each group in alphabetical order ignoring case");
         }
         assertEquals(List.of("XL-report"), suggestions("g1", "xl"), "a name starting with the typed text in another case is offered");
     }
 
     /**
-     * T-08-300 (issue #8, SPEC 8 "names that start with the typed text first ..., at most 20"): the
-     * 20 names offered are the first 20 of that order, so a name that starts with the typed text is
-     * not left out for names that only contain it. 25 jobs {@code a-zz-01} .. {@code a-zz-25} contain
-     * {@code zz}; {@code zz-top}, created last, starts with it and sorts after them: typing {@code zz}
-     * offers exactly 20 names, {@code zz-top} first and 19 {@code a-zz-*} jobs after it. Guard:
-     * {@code zz-t} offers {@code zz-top} alone.
+     * T-08-300 (issue #8, SPEC 8 "names that start with the typed text first ..., each group in
+     * alphabetical order ..., at most 20"): the 20 names offered are the first 20 of that order, so a
+     * name that starts with the typed text is not left out for names that only contain it. 25 jobs
+     * {@code a-zz-01} .. {@code a-zz-25} contain {@code zz}; {@code zz-top}, created last, starts with
+     * it and sorts after them: typing {@code zz} offers exactly 20 names, {@code zz-top} first and
+     * {@code a-zz-01} .. {@code a-zz-19} after it, in that order. Guard: {@code zz-t} offers
+     * {@code zz-top} alone.
      */
     @Test
     public void t_08_300_theTwentyNamesKeepTheNamesThatStartWithTheText() throws Exception {
@@ -363,14 +362,16 @@ public class ItemScopeUiTest {
             j.createFreeStyleProject(String.format("a-zz-%02d", i));
         }
         j.createFreeStyleProject("zz-top");
+        List<String> expected = new ArrayList<>(List.of("zz-top"));
+        for (int i = 1; i <= 19; i++) {
+            expected.add(String.format("a-zz-%02d", i));
+        }
 
         List<String> offered = suggestions("g1", "zz");
         assertEquals(20, offered.size(), "at most 20 names, and 26 match: " + offered);
         assertEquals("zz-top", offered.get(0), "the name that starts with the typed text must be offered first, not cut by the"
                 + " limit: " + offered);
-        for (String name : offered.subList(1, 20)) {
-            assertTrue(name.startsWith("a-zz-"), "the other 19 must be names that contain the typed text: " + offered);
-        }
+        assertEquals(expected, offered, "the other 19 are the first names that contain the typed text, in alphabetical order");
         assertEquals(List.of("zz-top"), suggestions("g1", "zz-t"), "guard: zz-top exists and g1 may read it");
     }
 
