@@ -64,6 +64,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  *
  * <p>Written from docs/SPEC.md, docs/TEST-MATRIX.md, issue #45 and the Wave C-UI contract only (no
  * src/main knowledge).
+ *
+ * <p>T-UI-318 (issue #150, note 375): the pager's links say Newer and Older, as History and Change
+ * Records already do, because every list is sorted newest first. The pager is found by the
+ * accessible name of its navigation landmark ({@code Pages of pending requests}), read from the page
+ * rendered on origin/main 06cfe2f1; its links are judged by the page they lead to, then by caption.
  */
 @WithJenkins
 public class PagerParameterTest {
@@ -72,6 +77,10 @@ public class PagerParameterTest {
     private static final String ENDED = "ended";
     private static final String PENDING_PAGE = "pendingPage";
     private static final String ENDED_PAGE = "endedPage";
+    /** The accessible name of the pending list's pager on the run requests page (T-UI-318). */
+    private static final String PENDING_PAGER = "pending requests";
+    private static final String NEWER = "Newer";
+    private static final String OLDER = "Older";
     /** Upper bound of the adaptive fill per list; a pager must appear well before. */
     private static final int MAX_FILL = 300;
     private static final int CHUNK = 10;
@@ -143,6 +152,42 @@ public class PagerParameterTest {
         Set<String> pending = fill(path, PENDING_PAGE, () -> activation(false));
         Set<String> ended = fill(path, ENDED_PAGE, () -> activation(true));
         assertPagersKeepEachOther(path, pending, ended);
+    }
+
+    /**
+     * T-UI-318 (#150): every list is sorted newest first, so the pager names its links by where
+     * they lead. On {@code batch-control/requests/} with more than one page of pending requests,
+     * page 1 of the pending list links to page 2 as "Older", page 2 links back to page 1 as
+     * "Newer", and neither reads "Previous" or "Next". Guard: the links still lead to the same
+     * pages (page 1 to 2, page 2 to 1), so a change that renamed them by swapping them would fail.
+     */
+    @Test
+    public void t_ui_318_pagerLinksSayNewerAndOlder() throws Exception {
+        String path = "batch-control/requests/";
+        java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        fill(path, PENDING_PAGE, () -> as("u1",
+                () -> RunRequestService.get().create(job, new LinkedHashMap<>(), "pending run " + n.incrementAndGet(), "a1").getId()));
+        Map<String, String> first = pagerLinks(page(path), PENDING_PAGER);
+        Map<String, String> second = pagerLinks(page(path + "?" + PENDING_PAGE + "=2"), PENDING_PAGER);
+
+        // Guard: the links lead where they did before (labels aside).
+        assertTrue(first.containsValue("2") && !first.containsValue("1"),
+                "guard: page 1 of the pending list links to page 2 and not to itself: " + first);
+        assertTrue(second.containsValue("1"), "guard: page 2 of the pending list links back to page 1: " + second);
+
+        List<String> failures = new ArrayList<>();
+        if (!"2".equals(first.get(OLDER))) {
+            failures.add("page 1: the link to page 2 must read '" + OLDER + "', links were " + first);
+        }
+        if (!"1".equals(second.get(NEWER))) {
+            failures.add("page 2: the link to page 1 must read '" + NEWER + "', links were " + second);
+        }
+        for (String old : Arrays.asList("Previous", "Next")) {
+            if (first.containsKey(old) || second.containsKey(old)) {
+                failures.add("no pager link may read '" + old + "': page 1 " + first + ", page 2 " + second);
+            }
+        }
+        assertTrue(failures.isEmpty(), "#150: " + String.join("; ", failures));
     }
 
     // ---------------------------------------------------------------- the check
@@ -284,6 +329,27 @@ public class PagerParameterTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * The links of the pager whose navigation is labelled {@code Pages of <label>}, as caption to
+     * the page of this list they lead to ({@code 1} when the link carries no page parameter).
+     */
+    private static Map<String, String> pagerLinks(HtmlPage page, String label) {
+        List<DomElement> navs = new ArrayList<>();
+        for (DomNode node : page.querySelectorAll("[role=navigation]")) {
+            DomElement nav = (DomElement) node;
+            if (("Pages of " + label).equals(nav.getAttribute("aria-label"))) {
+                navs.add(nav);
+            }
+        }
+        assertEquals(1, navs.size(), "premise: " + page.getUrl() + " has one pager labelled 'Pages of " + label + "'");
+        Map<String, String> out = new LinkedHashMap<>();
+        for (DomNode a : navs.get(0).querySelectorAll("a[href]")) {
+            String caption = a.getTextContent().trim();
+            out.put(caption, query(page, ((DomElement) a).getAttribute("href")).getOrDefault(PENDING_PAGE, "1"));
+        }
+        return out;
+    }
 
     /** Ids of {@code candidates} linked from rows of {@code table[data-batch-control-list=<list>]}, in order. */
     private static List<String> idsInList(HtmlPage page, String list, Set<String> candidates) {
