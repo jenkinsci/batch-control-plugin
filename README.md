@@ -2,14 +2,31 @@ Korean translation: [README.ko.md](README.ko.md)
 
 # Batch Control
 
-Run approval, time-boxed change permissions and an append-only audit history for
-Jenkins instances that are operated as a **batch execution manager** rather than
-as a CI server.
+Run approval, time-boxed change permissions and an audit history kept apart from
+builds, for Jenkins instances that are operated as a **batch execution manager**
+rather than as a CI server.
 
 It is for teams whose nightly and periodic production workload runs on Jenkins,
 where starting a job by hand or changing what it does is an operational change.
 Installing the plugin changes nothing by itself: both controls are off until an
 administrator turns them on.
+
+## See it in action
+
+**Requester's view:** a manual build of a protected job is refused, the same
+values go out as a run request with a reason, and once approver-1 approves it
+the build runs once with those values.
+
+![Animated recording of the requester's view, signed in as requester, under a step bar reading Press Build, Refused, Send request, Approved, runs once. On the build form of batch » daily-settlement the requester enters BUSINESS_DATE 2026-10-08, SCOPE ALL and DRY_RUN unchecked, and presses Build. The build is not started: the Request Run form opens with a framed notice saying so and the same values filled in. The requester types a reason and submits with approver-1 checked. After approver-1 approves with a comment, the request shows Executed with run #3, whose console names the approved request and settles business date 2026-10-08, scope ALL, dry run false.](docs/images/flow-requester.gif)
+
+**Approver's view:** a pending run request shows its reason and parameters as
+submitted; the approver adds a comment and approves, and the build appears on
+the Run Dashboard with the cause *Approved request*.
+
+![Animated recording of the approver's view, signed in as approver-1, under a step bar reading Request arrives, Check the values, Approve, Runs once, logged. Run Requests lists one pending request, for batch/daily-settlement from requester. Its page shows the reason, Vendor file came late, and the parameters BUSINESS_DATE 2026-10-08, SCOPE ALL and DRY_RUN false, each framed, with the Decision area right below them. The approver types the comment Vendor confirmed, go ahead, and presses Approve; the status becomes Approved, waiting to run, decided by approver-1. The Dashboard then lists batch/daily-settlement #3, Success, with the cause Approved request, the user requester and the same three parameter values.](docs/images/flow-approver.gif)
+
+Both were recorded against the Docker Compose demo; try it yourself with the
+demo in [`demo/`](demo/README.md).
 
 ## Key features
 
@@ -17,15 +34,19 @@ administrator turns them on.
   CLI, Replay) is refused at queue entry and becomes a run request. Only the
   designated approvers may decide it, and the approved build gets exactly the
   parameters they saw, once.
-- **Activation.** A job created while run control is on does not run on a
-  timer, upstream trigger, SCM trigger or webhook until an approver activates
-  it. Existing jobs keep their schedules.
+- **Activation.** A job created while run control is on starts with
+  **Require approval to run**, **Block cron (timer) triggers** and
+  **Block upstream triggers** checked. It does not run on a timer, upstream
+  trigger, SCM trigger or webhook until an approver activates it, and timer and
+  upstream triggers also need those switches cleared. Existing jobs keep their
+  schedules.
 - **Permission windows.** A user without standing rights requests `CREATE`,
   `CONFIGURE` or `DELETE` on one job or folder for a limited time; the window
   closes by itself.
 - **Audit history independent of builds.** Runs, requests, decisions,
-  configuration changes with diffs, and failures are kept append-only under
-  `$JENKINS_HOME/batch-control/`, with history screens and CSV export.
+  configuration changes with diffs, and failures are kept under
+  `$JENKINS_HOME/batch-control/`, with history screens and CSV export but no
+  edit or delete before retention expiry.
 - **Incidents.** Failed and unstable runs open an incident (the default;
   aborted runs can be added in the settings) with the last 100 console lines,
   to acknowledge, resolve and rerun through a request.
