@@ -1,0 +1,57 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>Loads the vendor extracts into the data warehouse. (Demo job: it only prints what it would do.)</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>
+      <approvalRequired>true</approvalRequired>
+      <blockTimer>false</blockTimer>
+      <blockUpstream>false</blockUpstream>
+      <allowedUpstreamJobs/>
+      <jobApprovers/>
+    </io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>LOAD_DATE</name>
+          <description>Extract date to load (YYYY-MM-DD).</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>TARGET</name>
+          <description>Warehouse schema to load into.</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>dwh_prod</string>
+              <string>dwh_replay</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>FULL_RELOAD</name>
+          <description>Truncate and reload the day instead of merging.</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo "Loading extract ${LOAD_DATE:-(not set)} into ${TARGET}, full reload ${FULL_RELOAD}"
+sleep 2
+echo "Load complete (demo: nothing was loaded anywhere)"
+</command>
+      <configuredLocalRules/>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>
