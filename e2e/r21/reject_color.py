@@ -21,7 +21,7 @@ D (#31, the check of the retired r6/s5c.py): the other destructive controls and 
 opens the three pending requests R, G and A filed above, and admin opens the grants list and the detail page of a
 window the requester holds (CONFIGURE on r21-reject, approved over REST for this section). On each page the control
 (core's l:confirmationLink: "Cancel Request", "Revoke") is measured against the same var(--destructive-color) probe,
-then clicked: core's confirmation dialog must open, its OK button ("Cancel request", "Revoke") must be red (its
+then clicked: core's confirmation dialog must open, its OK button ("Withdraw request", "Revoke") must be red (its
 computed colour or background is the probe's: core's destructive dialog type) and its Cancel button not, and Cancel
 must close the dialog and change nothing (the request still pending, the window still conferring Configure). The rows
 are judged by ci/h1_rules.py (driver "destructive": destructive-button, destructive-dialog, destructive-measured; a

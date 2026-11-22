@@ -425,7 +425,7 @@ def _btn(label, color, before, classes):
 
 
 def _destructive(where, control, **change):
-    ok_text = {"Cancel Request": "Cancel request", "Revoke": "Revoke", "Revert to the plain strategy": "Revert to plain strategy"}[control]
+    ok_text = {"Cancel Request": "Withdraw request", "Revoke": "Revoke", "Revert to the plain strategy": "Revert to plain strategy"}[control]
     r = {"where": where, "control": control, "user": "requester" if control == "Cancel Request" else "admin", "page": "/batch-control/x/",
          "http": 200, "probe": RED, "around": TEXT, "count": 1,
          "button": {"label": control, "color": RED, "bg": NONE, "visible": True,
