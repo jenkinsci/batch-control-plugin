@@ -1,0 +1,62 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>Posts the day's card and transfer settlements to the general ledger. (Demo job: it only prints what it would do.)</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>
+      <approvalRequired>true</approvalRequired>
+      <blockTimer>false</blockTimer>
+      <blockUpstream>false</blockUpstream>
+      <allowedUpstreamJobs/>
+      <jobApprovers/>
+    </io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>BUSINESS_DATE</name>
+          <description>Business date to settle (YYYY-MM-DD).</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>SCOPE</name>
+          <description>Settlement streams to process.</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>ALL</string>
+              <string>CARD</string>
+              <string>TRANSFER</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>DRY_RUN</name>
+          <description>Validate and report only; nothing is posted to the ledger.</description>
+          <defaultValue>true</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo "Settling business date ${BUSINESS_DATE:-(not set)}, scope ${SCOPE}, dry run ${DRY_RUN}"
+sleep 3
+if [ "${DRY_RUN}" = "true" ]; then
+  echo "Dry run: 18240 entries validated, nothing posted"
+else
+  echo "18240 entries posted to the ledger (demo: nothing was posted anywhere)"
+fi
+</command>
+      <configuredLocalRules/>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>

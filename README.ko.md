@@ -95,6 +95,15 @@ plugins**는 업그레이드를 함께 제안하지만 **Deploy Plugin**은 제�
 빌드한 것을 **Advanced settings → Deploy Plugin**에서 올립니다. 빌드에는 Maven과 JDK 21 또는
 25가 필요하며, `mvn clean package`가 `target/batch-control.hpi`를 만듭니다.
 
+## 로컬에서 체험하기
+
+`demo/`의 Docker Compose 데모는 Batch Control이 설치되고 두 통제가 켜진 일회용 Jenkins를
+띄웁니다. 사용자 세 명과 보호된 잡 두 개가 준비되어 있습니다. 저장소 루트에서
+`cd demo && docker compose up`을 실행하고(처음 시작할 때는 이미지를 빌드하느라 몇 분 걸립니다)
+<http://localhost:8080/> 주소로 접속합니다. 로컬 평가 전용입니다. Jenkins는 127.0.0.1에서만 접속을 받고
+비밀번호는 고정되어 있습니다. 로그인 정보와 따라 해 보기는 [`demo/README.md`](demo/README.md)에
+있습니다(영문).
+
 ## 빠른 시작
 
 1. **Manage Jenkins → System → Batch Control**에서 **Enable run control**을 체크하고(권한 창이

@@ -1,0 +1,35 @@
+# Batch Control demo: `docker compose up`, then open http://localhost:8080/
+# (README.md next to this file). Another port: DEMO_PORT=8081 docker compose up
+#
+# DEMO ONLY: fixed passwords, published on 127.0.0.1 only. Not a production setup.
+name: batch-control-demo
+
+services:
+  jenkins:
+    build: .
+    # Tagged with the Batch Control version of plugins.txt: bump both together, so that
+    # an existing image is not reused for a new version.
+    image: batch-control-demo:1545.v013d127dfcf5
+    ports:
+      # Bound to the loopback interface: the demo is not reachable from other machines.
+      - "127.0.0.1:${DEMO_PORT:-8080}:8080"
+    environment:
+      # runSetupWizard=false: users and permissions come from casc.yaml instead.
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Xmx1g
+      # casc.yaml builds the Jenkins URL from it, so links match the published port.
+      DEMO_PORT: "${DEMO_PORT:-8080}"
+    volumes:
+      # JENKINS_HOME: builds, requests and history survive `docker compose down`;
+      # `docker compose down -v` deletes them.
+      - jenkins_home:/var/jenkins_home
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+volumes:
+  jenkins_home:

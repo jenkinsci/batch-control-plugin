@@ -1,0 +1,60 @@
+# Configuration as Code for the Batch Control demo, applied on every start.
+#
+# DEMO ONLY: the passwords are fixed and written down in README.md. Do not copy this
+# file into a Jenkins that anyone else can reach.
+jenkins:
+  systemMessage: >-
+    Batch Control demo, local only. Log in as requester, approver-1 or admin
+    (password batch-demo); demo/README.md has the walkthrough.
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: Demo Administrator
+          password: batch-demo
+        - id: requester
+          name: Requester
+          password: batch-demo
+        - id: approver-1
+          name: Approver One
+          password: batch-demo
+  # The Batch Control variant of matrix-auth's project-based matrix: the same matrix,
+  # plus the temporary permissions of approved permission windows.
+  # Permission names: BatchControl/<Name>, Job/<Name> (Item), Overall/<Name>.
+  authorizationStrategy:
+    batchControlProjectMatrix:
+      entries:
+        - user:
+            name: admin
+            permissions:
+              - Overall/Administer
+        - user:
+            name: requester
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Request
+              - BatchControl/RequestGrant
+              # Not needed to request a run (BatchControl/Request and Job/Read are).
+              # Granted here only so that the demo can show Build Now being refused.
+              - Job/Build
+        - user:
+            name: approver-1
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+unclassified:
+  location:
+    url: "http://localhost:${DEMO_PORT:-8080}/"
+  batchControl:
+    runControlEnabled: true
+    changeControlEnabled: true
+    approvers:
+      - approver-1
+    allowAdminSelfApproval: false
