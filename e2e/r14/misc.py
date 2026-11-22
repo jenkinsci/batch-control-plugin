@@ -1,7 +1,7 @@
 """e2e-12 part 4: the remaining controls, one section per letter (python misc.py CHPBTRSMKD).
 C configuration page (Save, refused save, Manage-only user, roles without access)
 H History (filters, kinds, monthly, CSV/JSON links), Changes/Incidents month navigation
-P paging Previous/Next on list pages (rows differ, Previous returns)
+P paging Older/Newer on list pages (rows differ, Newer returns)
 B breadcrumbs and the Batch Control breadcrumb context menu
 T tab badges against the pending rows they count
 R refusal pages (approval required, grant required, move refusal) and their links
