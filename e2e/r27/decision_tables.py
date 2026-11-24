@@ -1062,49 +1062,52 @@ def sec_Q():
                 loc.blur()
             s.page.wait_for_timeout(200)
             field_res = s.page.evaluate(APPROVERS_ERR_JS) or {}
-            with s.page.expect_response(
-                lambda r: r.request.method == "POST" and ("configSubmit" in r.url or "configure" in r.url)
-            ) as ri:
-                s.page.locator("button[name=Submit]").first.click()
+            with s.page.expect_navigation(timeout=20000):
+                with s.page.expect_response(
+                    lambda r: r.request.method == "POST" and ("configSubmit" in r.url or "configure" in r.url)
+                ) as ri:
+                    s.page.locator("button[name=Submit]").first.click()
             s.page.wait_for_load_state("load")
-            raw_tas = s.page.locator("textarea").evaluate_all("els => els.map(e => e.value)")
-            textareas = [v.replace("\r\n", "\n") for v in raw_tas]
-            body_text = s.page.locator("body").inner_text()
+            approvers_val = s.page.locator("[name='_.approversText']").first.input_value().replace("\r\n", "\n")
+            alerts = [" ".join(t.split()) for t in s.page.locator(".jenkins-alert, .alert, [role='alert']").all_inner_texts() if t.strip()]
             s.done()
-            return ri.value.status, field_res, textareas, body_text
+            return ri.value.status, field_res, approvers_val, alerts
 
         bad_approvers = "approver-1\nno-such-user"
-        status_unknown, res_unknown, tas_unknown, body_unknown = submit_approvers(bad_approvers)
+        status_unknown, res_unknown, val_unknown, alerts_unknown = submit_approvers(bad_approvers)
         errs_unknown = res_unknown.get("errors") or []
         check(
             "Q",
             "D-53 #122: an unknown approver id on the configuration page is refused with a message under the field, "
             "the input is kept, and nothing is stored",
             any("no-such-user" in e and "not a known Jenkins user" in e for e in errs_unknown)
-            and bad_approvers in tas_unknown
-            and "no-such-user" in body_unknown
+            and val_unknown == bad_approvers
+            and any(al.startswith("Nothing was saved.") and "no-such-user" in al.lower() for al in alerts_unknown)
             and status_unknown >= 400
             and settings() == now,
             status=status_unknown,
             field=res_unknown,
-            textareas=tas_unknown,
+            approvers=val_unknown,
+            alerts=alerts_unknown,
             now=settings(),
             expected=now,
         )
 
-        status_empty, res_empty, tas_empty, _ = submit_approvers("", enable_switch=True)
+        status_empty, res_empty, val_empty, alerts_empty = submit_approvers("", enable_switch=True)
         errs_empty = res_empty.get("errors") or []
         check(
             "Q",
             "D-53 #122: an empty approver list while a switch is on is refused on the configuration page "
             "and nothing is stored",
             any("at least one approver is required" in e for e in errs_empty)
-            and "" in tas_empty
+            and val_empty == ""
+            and any(al.startswith("Nothing was saved.") and "at least one approver is required" in al.lower() for al in alerts_empty)
             and status_empty >= 400
             and settings() == now,
             status=status_empty,
             field=res_empty,
-            textareas=tas_empty,
+            approvers=val_empty,
+            alerts=alerts_empty,
             now=settings(),
             expected=now,
         )
