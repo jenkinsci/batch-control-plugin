@@ -40,11 +40,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # build.yml's Maven cache and key (see its checks job, #177), restore only: a cache
+      # this job saved would hold the newest role-strategy instead of the pinned one.
+      - name: Record the Maven line for the cache key
+        shell: bash
+        run: |
+          mkdir -p target
+          mvn -B -v | sed -n 's/^Apache Maven \([0-9]*\.[0-9]*\).*/\1/p' > target/maven-line.txt
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/extensions.xml
+            .mvn/maven.config
+            target/maven-line.txt
+          cache-read-only: true
       - name: Resolve the role-strategy version
         id: version
         env:
