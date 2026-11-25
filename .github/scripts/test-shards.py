@@ -17,8 +17,12 @@ Usage:
       default "21").
   test-shards.py verify <group-id>
       Run after a group's Surefire run. Checks that target/surefire-reports holds a report
-      for every class assigned to the group and for no other class, then writes the
-      group's test counts to $GITHUB_STEP_SUMMARY.
+      for every class assigned to the group and for no other class, and that no report
+      counts a failure or an error (a test that failed and then passed on a rerun counts
+      as a flake, not as a failure). Writes the group's test counts to
+      $GITHUB_STEP_SUMMARY, then exits 1 when a check fails, with one error line per
+      failing, missing or extra class. The failure check is a second guard behind the
+      Maven step's exit status (#172).
 
 The pattern matching mirrors Surefire's -Dtest handling for patterns without a package
 part: the pattern is matched against the simple class name, '*' matches any run of
@@ -49,6 +53,9 @@ HEADER = re.compile(r"^\[(.*)\]$")
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
 PATTERN_SYNTAX = re.compile(r"^[A-Za-z0-9_*]+$")
+
+# The counts "verify" reads from the <testsuite> element of each Surefire report.
+COUNT_KEYS = ("tests", "failures", "errors", "skipped")
 
 
 def fail(msg):
@@ -193,14 +200,15 @@ def cmd_verify(gid):
         fail(f"unknown group id '{gid}'")
     label = next(g["label"] for g in groups if g["id"] == gid)
     expected = set(by_group[gid])
-    reported = {p.name[len("TEST-"):-len(".xml")] for p in REPORTS.glob("TEST-*.xml")}
-    missing = sorted(expected - reported)
-    extra = sorted(reported - expected)
-    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    counts = {}
     for p in REPORTS.glob("TEST-*.xml"):
         root = ET.parse(p).getroot()
-        for k in totals:
-            totals[k] += int(root.get(k, "0"))
+        counts[p.name[len("TEST-"):-len(".xml")]] = {k: int(root.get(k, "0")) for k in COUNT_KEYS}
+    reported = set(counts)
+    missing = sorted(expected - reported)
+    extra = sorted(reported - expected)
+    failing = sorted(c for c, n in counts.items() if n["failures"] or n["errors"])
+    totals = {k: sum(n[k] for n in counts.values()) for k in COUNT_KEYS}
     summary = (
         f"### Group {label}\n\n"
         f"{len(reported)} of {len(expected)} classes reported; "
@@ -210,11 +218,15 @@ def cmd_verify(gid):
     print(summary)
     write_summary(summary)
     write_output("tests", totals["tests"])
+    # Failing classes first: GitHub shows only the first ten error annotations of a step.
+    for c in failing:
+        print(f"::error::group {label}: {c} failed "
+              f"(failures {counts[c]['failures']}, errors {counts[c]['errors']})")
     for c in missing:
         print(f"::error::group {label}: no Surefire report for {c}")
     for c in extra:
         print(f"::error::group {label}: ran {c}, which belongs to another group")
-    if missing or extra:
+    if failing or missing or extra:
         sys.exit(1)
 
 

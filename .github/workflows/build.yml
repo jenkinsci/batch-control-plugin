@@ -39,6 +39,15 @@ concurrency:
   group: build-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.ref) || github.sha }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
+# Every run step uses "shell: bash", which GitHub runs as "bash --noprofile --norc -eo
+# pipefail {0}" (#172). A step with no shell runs as "bash -e {0}", without pipefail: the
+# Maven steps pipe into tee, so the pipeline's status was tee's 0, the step passed whatever
+# Maven did and the #88 retry never ran. Set for the whole workflow, so a new step cannot
+# leave it out.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   plan:
     name: shard safeguard
@@ -78,7 +87,8 @@ jobs:
       # Retry once on a transient artifact-resolution failure, as in the test jobs (#88):
       # only a resolution error retries, so a real check failure still fails at once.
       # The two-attempt loop keeps a single copy of the command, so the retry cannot
-      # drift from the first attempt.
+      # drift from the first attempt. With pipefail (the defaults above, #172), status is
+      # Maven's exit status, not tee's.
       - name: Build and check (tests skipped)
         run: |
           attempt=0
@@ -121,7 +131,8 @@ jobs:
       # Retry once on a transient artifact-resolution failure (#88): only a resolution
       # error retries, so a real test failure still fails the step at once. The
       # two-attempt loop keeps a single copy of the command, so the retry cannot drift
-      # from the first attempt.
+      # from the first attempt. With pipefail (the defaults above, #172), status is
+      # Maven's exit status, not tee's.
       - name: Test
         env:
           GROUP_TESTS: ${{ matrix.tests }}
@@ -142,7 +153,10 @@ jobs:
             echo "Maven failed on artifact resolution; retrying once (see #88)"
           done
           exit "$status"
-      - name: Check that the group ran exactly its classes
+      # A second guard behind the Test step's exit status (#172): fails when a class of
+      # the group has no report, a class of another group ran, or a report counts a
+      # failure or an error.
+      - name: Check that the group ran exactly its classes and they passed
         env:
           GROUP_ID: ${{ matrix.group }}
         run: python3 .github/scripts/test-shards.py verify "$GROUP_ID"
