@@ -15,9 +15,9 @@ So each of the nine lists holds more than 50 rows (50 a page). The viewer is adm
 context per page.
 
 A  arrangement: sweeps r25-pager's leftovers of an earlier run (pending requests cancelled, windows revoked, queue items
-   of r25-pg cancelled), then creates the above; fixture: every list of the three pages has a Next link on page 1.
+   of r25-pg cancelled), then creates the above; fixture: every list of the three pages has an Older link on page 1.
 P  for each page and each list L: from ?pendingPage=2&activePage=2&endedPage=2 (guard: every list shows its page 2),
-   L's Previous, then L's Next is clicked. #45 contract: the URL keeps the two other lists' parameters at 2 and their
+   L's Newer, then L's Older is clicked. #45 contract: the URL keeps the two other lists' parameters at 2 and their
    tables still show their page 2 (footer "Page 2", the same rows as before the click). Guard: L's own parameter and
    table change to the page clicked.
 X  escaping guard: with a parameter value holding markup (another parameter, a list's own page parameter) or & and =,
@@ -244,12 +244,12 @@ def sec_A():
     for page, path in PAGES.items():
         s.go(path)
         views = lists_of(s)
-        fixture[page] = {L: {"footer": (views[L] or {}).get("footer"), "next": bool(link_of(views[L], "Next"))} for L in LISTS}
+        fixture[page] = {L: {"footer": (views[L] or {}).get("footer"), "next": bool(link_of(views[L], "Older"))} for L in LISTS}
     s.done()
     S["fixture"] = fixture
     check("A", "arrangement: r25-pg/j01..j51 exist, bound to r25-nowhere and approval-required; r25-pager filed and "
           "approver-2 decided every request (2xx/3xx); every list of the Run Requests, Grants and Activations pages has "
-          "more than one page (a Next link on page 1)",
+          "more than one page (an Older link on page 1)",
           items["ok"] and ok_codes and all(v["next"] for p in fixture.values() for v in p.values()), codes=codes, fixture=fixture,
           perms=perms)
 
@@ -259,9 +259,9 @@ def query_of(url):
 
 
 def start_state(s, path, L, text):
-    """The state a click starts from: every list on page 2 (for Previous), or L on page 1 and the others on page 2
-    (for Next: the state the fixed links lead to, loaded by URL so that the Next check does not depend on Previous)."""
-    if text == "Previous":
+    """The state a click starts from: every list on page 2 (for Newer), or L on page 1 and the others on page 2
+    (for Older: the state the fixed links lead to, loaded by URL so that the Older check does not depend on Newer)."""
+    if text == "Newer":
         qs = "pendingPage=2&activePage=2&endedPage=2"
     else:
         qs = "&".join(f"{PARAM[o]}={1 if o == L else 2}" for o in LISTS)
@@ -270,7 +270,7 @@ def start_state(s, path, L, text):
 
 
 def click_pager(s, path, L, text):
-    """Clicks L's Previous/Next from its start state and reads the result. A row that moves list between loading the
+    """Clicks L's Newer/Older from its start state and reads the result. A row that moves list between loading the
     start state and the click (another unit's request expiring) changes a page's rows; a second attempt tells that apart
     from a dropped parameter."""
     others = [o for o in LISTS if o != L]
@@ -298,12 +298,12 @@ def click_pager(s, path, L, text):
 def sec_P():
     for page, path in PAGES.items():
         s = Session(VIEWER, fresh=True)
-        _, all2 = start_state(s, path, None, "Previous")
+        _, all2 = start_state(s, path, None, "Newer")
         check("P", f"guard: {page}: ?pendingPage=2&activePage=2&endedPage=2 shows page 2 of every list",
               all(page_no(all2[L]) == 2 for L in LISTS), footers={L: (all2[L] or {}).get("footer") for L in LISTS})
         for L in LISTS:
             others = [o for o in LISTS if o != L]
-            for text, want in (("Previous", 1), ("Next", 2)):
+            for text, want in (("Newer", 1), ("Older", 2)):
                 res = click_pager(s, path, L, text)
                 s.shot([f'table[data-batch-control-list="{o}"]' for o in LISTS], f"R25-45-{page}-{L}-{text.lower()}")
                 q = res.get("query") or {}
@@ -349,7 +349,7 @@ def sec_X():
                    if not v <= ({sent[k]} | ({shown[k]} if k in shown and not sent[k].isdigit() else set()))}
             check("X", f"escaping guard: {page} with {what}: no injected element, the pager links are intact "
                   "and every value a link carries round-trips unchanged", (r.status if r else None) == 200
-                  and injected == 0 and set(texts) <= {"Previous", "Next"} and bool(links) and not bad,
+                  and injected == 0 and set(texts) <= {"Newer", "Older"} and bool(links) and not bad,
                   status=r.status if r else None, injected=injected, link_texts=texts, mismatched=bad,
                   hrefs=[lk["href"] for _, lk in links][:6])
         s.shot("#main-panel", f"R25-45-{page}-escaping")
@@ -361,15 +361,15 @@ def sec_S():
     s.go(PAGES["requests"] + "?pendingPage=2&activePage=2&endedPage=2")
     s.shot("#main-panel", "R25-45-summary-1-all-page-2")
     view = lists_of(s)
-    href = link_of(view["ended"], "Previous")
+    href = link_of(view["ended"], "Newer")
     if href:
         nav = s.page.locator('table[data-batch-control-list="ended"]').locator(
-            "xpath=following-sibling::*[@role='navigation'][1]").locator("a", has_text=re.compile("^Previous$"))
+            "xpath=following-sibling::*[@role='navigation'][1]").locator("a", has_text=re.compile("^Newer$"))
         with s.page.expect_navigation(timeout=20000):
             nav.first.click()
         s.page.wait_for_load_state("load")
     s.shot("#main-panel", "R25-45-summary-2-after-ended-previous")
-    note("S", "screen: the Requests page after the Ended list's Previous from the all-page-2 state",
+    note("S", "screen: the Requests page after the Ended list's Newer from the all-page-2 state",
          url=s.page.url.replace(lib.BASE, ""), footers={L: (lists_of(s)[L] or {}).get("footer") for L in LISTS})
     s.done()
 
