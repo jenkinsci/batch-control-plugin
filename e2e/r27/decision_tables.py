@@ -945,6 +945,9 @@ CONFIG_JS = """() => { const n = t => (t || '').replace(/\\s+/g, ' ').trim();
       afterLast: !!(last && last.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)}))}; }"""
 
 
+APPROVERS_ERR_JS = """() => { const f = document.querySelector('[name="_.approversText"]'); if (!f) return null; const item = f.closest('.jenkins-form-item, tr') || f.parentElement; const errs = item ? [...item.querySelectorAll('.error, .validation-error-area .error')].filter(e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)).map(e => e.textContent.replace(/\\s+/g, ' ').trim()).filter(Boolean) : []; return {value: f.value, errors: errs}; }"""
+
+
 def settings():
     return lib.facts(lib.L25.CFG + """return groovy.json.JsonOutput.toJson([run: cfg.runControlEnabled,
   change: cfg.changeControlEnabled, approvers: cfg.approversText, self: cfg.allowAdminSelfApproval,
@@ -1047,6 +1050,67 @@ def sec_Q():
               "through the Batch Control page reaches the store; nothing else changes", code < 400
               and now == dict(arranged, pending=arranged["pending"] + 1, notify=7, retention=13, email=not arranged["email"]),
               save=code, now=now, arranged=arranged)
+        # ---- D-53 (#122): approver list validation on the configuration page
+        def submit_approvers(text, enable_switch=False):
+            s = Session("admin")
+            s.go(CONFIGS[1][0])
+            if enable_switch:
+                s.page.locator("[name='_.runControlEnabled']").first.set_checked(True, force=True)
+            loc = s.page.locator("[name='_.approversText']").first
+            with s.page.expect_response(lambda r: "checkApproversText" in r.url):
+                loc.fill(text)
+                loc.blur()
+            s.page.wait_for_timeout(200)
+            field_res = s.page.evaluate(APPROVERS_ERR_JS) or {}
+            with s.page.expect_navigation(timeout=20000):
+                with s.page.expect_response(
+                    lambda r: r.request.method == "POST" and ("configSubmit" in r.url or "configure" in r.url)
+                ) as ri:
+                    s.page.locator("button[name=Submit]").first.click()
+            s.page.wait_for_load_state("load")
+            approvers_val = s.page.locator("[name='_.approversText']").first.input_value().replace("\r\n", "\n")
+            alerts = [" ".join(t.split()) for t in s.page.locator(".jenkins-alert, .alert, [role='alert']").all_inner_texts() if t.strip()]
+            s.done()
+            return ri.value.status, field_res, approvers_val, alerts
+
+        bad_approvers = "approver-1\nno-such-user"
+        status_unknown, res_unknown, val_unknown, alerts_unknown = submit_approvers(bad_approvers)
+        errs_unknown = res_unknown.get("errors") or []
+        check(
+            "Q",
+            "D-53 #122: an unknown approver id on the configuration page is refused with a message under the field, "
+            "the input is kept, and nothing is stored",
+            any("no-such-user" in e and "not a known Jenkins user" in e for e in errs_unknown)
+            and val_unknown == bad_approvers
+            and any(al.startswith("Nothing was saved.") and "no-such-user" in al.lower() for al in alerts_unknown)
+            and status_unknown >= 400
+            and settings() == now,
+            status=status_unknown,
+            field=res_unknown,
+            approvers=val_unknown,
+            alerts=alerts_unknown,
+            now=settings(),
+            expected=now,
+        )
+
+        status_empty, res_empty, val_empty, alerts_empty = submit_approvers("", enable_switch=True)
+        errs_empty = res_empty.get("errors") or []
+        check(
+            "Q",
+            "D-53 #122: an empty approver list while a switch is on is refused on the configuration page "
+            "and nothing is stored",
+            any("at least one approver is required" in e for e in errs_empty)
+            and val_empty == ""
+            and any(al.startswith("Nothing was saved.") and "at least one approver is required" in al.lower() for al in alerts_empty)
+            and status_empty >= 400
+            and settings() == now,
+            status=status_empty,
+            field=res_empty,
+            approvers=val_empty,
+            alerts=alerts_empty,
+            now=settings(),
+            expected=now,
+        )
     finally:
         put_settings(before)
     back = settings()
