@@ -39,6 +39,7 @@ final class DialogFixtures {
 
     private static final String HOST = "bc-dialog-host";
     private static final String SOURCE = "bc-dialog-source";
+    private static final String READY_ATTRIBUTE = "data-bc-dialog-ready";
 
     private DialogFixtures() {
         // utility class
@@ -88,11 +89,14 @@ final class DialogFixtures {
                 + " host.id = '" + HOST + "';"
                 + " host.innerHTML = text;"
                 + " document.body.appendChild(host);"
-                + " evalInnerHtmlScripts(text, function () { Behaviour.applySubtree(host, true); });"
+                + " evalInnerHtmlScripts(text, function () {"
+                + "   Behaviour.applySubtree(host, true);"
+                + "   host.setAttribute('" + READY_ATTRIBUTE + "', 'true');"
+                + " });"
                 + "})();");
-        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
         DomElement host = page.getElementById(HOST);
         assertNotNull(host, "fixture: the fragment must have been inserted into the job page");
+        waitForDialogInitialization(wc, host);
         List<HtmlForm> forms = host.getByXPath(".//form");
         assertEquals(1, forms.size(), "fixture: the inserted fragment must hold exactly one form: "
                 + UsabilityFixtures.excerpt(host.asXml()));
@@ -101,6 +105,20 @@ final class DialogFixtures {
         assertTrue(UsabilityFixtures.stripQueryAndSlash(action).endsWith(job.getUrl() + "batch-control/submit"),
                 "fixture: the dialog form must post to the job's submit endpoint, was " + action);
         return form;
+    }
+
+    /**
+     * Waits for the fragment's scripts and Jenkins behaviours to finish initializing the dialog.
+     * Other page scripts may keep background timers alive, so readiness is the callback's marker,
+     * not an empty global JavaScript queue.
+     */
+    private static void waitForDialogInitialization(JenkinsRule.WebClient wc, DomElement host) {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (!"true".equals(host.getAttribute(READY_ATTRIBUTE)) && System.currentTimeMillis() < deadline) {
+            wc.waitForBackgroundJavaScript(1000);
+        }
+        assertEquals("true", host.getAttribute(READY_ATTRIBUTE),
+                "fixture: dialog scripts and behaviours must finish initializing within 30 s");
     }
 
     /**

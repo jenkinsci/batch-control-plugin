@@ -261,24 +261,6 @@ final class TypedParameterFixtures {
     }
 
     /**
-     * Waits until no background JavaScript is pending (up to 30 s) and fails as a fixture
-     * error when jobs are still pending: a page whose scripts are still running must not be
-     * picked from. The old blind {@code waitForBackgroundJavaScript(5000)} returned the
-     * pending-job count and the callers ignored it, so on a slow page (Windows took ~16 s to
-     * load) the credentials list was still filling when the test picked from it, and the
-     * refill then restored the parameter's default (issue #176).
-     */
-    static void waitForBackgroundJavaScriptIdle(JenkinsRule.WebClient wc) {
-        long deadline = System.currentTimeMillis() + 30_000;
-        int pending = wc.waitForBackgroundJavaScript(1000);
-        while (pending > 0 && System.currentTimeMillis() < deadline) {
-            pending = wc.waitForBackgroundJavaScript(1000);
-        }
-        assertEquals(0, pending, "fixture: background JavaScript must settle before the page is used; "
-                + pending + " job(s) still pending after 30 s");
-    }
-
-    /**
      * Submits {@code job}'s Request Run form as {@code userId} with the given simple values and
      * files, and returns the id of the one request it created (asserted).
      */
