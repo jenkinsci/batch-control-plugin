@@ -102,11 +102,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The Maven cache of build.yml's jobs, with the same key (see its checks job, #177).
+      # Restore only: this job resolves less than the checks jobs that save it (no
+      # SpotBugs, no Surefire runtime), and a cache key is saved once, by the first job
+      # to finish, so a cache this job saved would send every test job to Maven Central.
+      - name: Record the Maven line for the cache key
+        shell: bash
+        run: |
+          mkdir -p target
+          mvn -B -v | sed -n 's/^Apache Maven \([0-9]*\.[0-9]*\).*/\1/p' > target/maven-line.txt
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/extensions.xml
+            .mvn/maven.config
+            target/maven-line.txt
+          cache-read-only: true
       - name: Build the plugin (tests skipped)
         run: mvn -ntp -B clean package -DskipTests
       # One build for every job: the classes the coverage job reads must be the ones in the hpi.
