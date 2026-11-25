@@ -48,14 +48,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Hosting review UI polish (68b0f80), automated evidence for checklist items that only had e2e
- * coverage. Matrix rows T-UI-50..52 (note 202) and T-UI-52b (note 286):
+ * coverage. Matrix rows T-UI-50..52 (note 202), T-UI-52b (note 286) and T-UI-317 (note 374):
  * <ul>
  *   <li>Batch Control's administrative monitors and the approval-required refusal page
  *   (ApprovalRequiredFailure) render their alert text without a leading {@code <p>} (core's alert
  *   padding then holds);</li>
  *   <li>the Cancel (request detail), Revoke (active grants) and Revert (strategy uninstall)
  *   controls, and (T-UI-52b) the Reject control on pending run, permission window and activation
- *   request pages, carry core's {@code jenkins-!-destructive-color} class.</li>
+ *   request pages, carry core's {@code jenkins-!-destructive-color} class;</li>
+ *   <li>(T-UI-317, issue #151) the confirmation dialog of Cancel Request on those three pages has an
+ *   OK button reading "Withdraw request", not a second "Cancel".</li>
  * </ul>
  * Written from the coordinator's checklist and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
@@ -63,6 +65,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class PolishMarkupTest {
 
     static final String DESTRUCTIVE = "jenkins-!-destructive-color";
+    /** Core's {@code l:confirmationLink} renders as an {@code a.confirmation-link} carrying its dialog's OK text. */
+    static final String CONFIRMATION_LINK = "confirmation-link";
+    static final String OK_TEXT = "data-ok-text";
+    /** Issue #151: the OK text of the Cancel Request confirmation. */
+    static final String WITHDRAW_REQUEST = "Withdraw request";
 
     private JenkinsRule j;
 
@@ -221,6 +228,69 @@ public class PolishMarkupTest {
             }
         }
         assertTrue(failures.isEmpty(), failures.size() + " of 3 Reject controls fail:\n" + String.join("\n", failures));
+    }
+
+    /**
+     * T-UI-317 (issue #151): the requester's Cancel Request on the detail page of a pending run
+     * request, a pending permission window (grant) request and a pending activation request opens
+     * core's confirmation dialog, whose own dismiss button reads "Cancel". The dialog's OK button
+     * must read "Withdraw request", so the two buttons do not share the word "Cancel". The OK text is
+     * read from core's {@code data-ok-text} on the {@code confirmation-link}, found by its endpoint
+     * ({@code /cancel}), never by its caption. Guards: the control must be on each page and be core's
+     * confirmation link (a missing control fails, it is not skipped), and Revoke on the active grants
+     * list keeps its own OK text "Revoke" (the change is limited to the three Cancel controls).
+     */
+    @Test
+    public void t_ui_317_cancelConfirmationOkTextIsWithdrawRequest() throws Exception {
+        BatchControlMatrixAuthorizationStrategy s = StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy());
+        s.add(BatchControlPermissions.REQUEST, PermissionEntry.user("bob"));
+        s.add(Item.BUILD, PermissionEntry.user("bob")); // a run request needs Item/Build on this branch (D-38)
+        j.jenkins.setAuthorizationStrategy(s);
+        BatchControlGlobalConfiguration cfg = StrategyFixtures.changeControlOn(); // a1 the only approver
+        cfg.setRunControlEnabled(true);
+        cfg.save();
+        FreeStyleProject job = j.createFreeStyleProject("batch-x");
+        BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(true));
+        FreeStyleProject inactive = j.createFreeStyleProject("batch-y");
+        BatchControlFixtures.setBatchControl(inactive, new BatchControlJobProperty(true));
+
+        RunRequest run = StrategyFixtures.as("bob",
+                () -> RunRequestService.get().create(job, new LinkedHashMap<>(), "month-end run", "a1"));
+        GrantRequest grant = StrategyFixtures.as("bob", () -> GrantRequestService.get().create(
+                new GrantScope(GrantScope.Type.ITEM, "batch-x"), Arrays.asList(GrantAction.CONFIGURE),
+                StrategyFixtures.WINDOW_MINUTES, "maintenance for batch-x", "a1"));
+        ActivationRequest activation = StrategyFixtures.as("bob", () -> ActivationService.get().create(inactive,
+                ActivationRequest.Action.ACTIVATE, "bring batch-y into service", Collections.singletonList("a1")));
+        assertNotNull(run, "fixture: bob's run request");
+        assertNotNull(grant, "fixture: bob's grant request");
+        assertNotNull(activation, "fixture: bob's activation request");
+        StrategyFixtures.grant("carol", "batch-x", Arrays.asList(GrantAction.CONFIGURE));
+
+        String[][] pages = {
+            {"batch-control/requests/" + run.getId() + "/", "Cancel on the pending run request"},
+            {"batch-control/grants/" + grant.getId() + "/", "Cancel on the pending permission window request"},
+            {"batch-control/activations/" + activation.getId() + "/", "Cancel on the pending activation request"},
+        };
+        List<String> failures = new ArrayList<>();
+        for (String[] p : pages) {
+            HtmlPage detail = page("bob", p[0]);
+            HtmlElement cancel = control(detail, "/cancel");
+            assertNotNull(cancel, p[1] + ": premise: bob is offered Cancel on " + p[0] + ": " + excerpt(detail.asNormalizedText()));
+            assertTrue(cancel.getAttribute("class").contains(CONFIRMATION_LINK),
+                    p[1] + ": premise: the control is core's confirmation link: " + excerpt(cancel.asXml()));
+            String okText = cancel.getAttribute(OK_TEXT);
+            if (!WITHDRAW_REQUEST.equals(okText)) {
+                failures.add(p[1] + ": the dialog's OK text must be '" + WITHDRAW_REQUEST + "', was '" + okText + "'");
+            }
+        }
+        // guard: another confirmation link keeps its own OK text
+        HtmlElement revoke = control(page("admin", "batch-control/grants/"), "/revoke");
+        assertNotNull(revoke, "guard: admin is offered Revoke on carol's active grant");
+        assertTrue(revoke.getAttribute("class").contains(CONFIRMATION_LINK),
+                "guard: Revoke is core's confirmation link: " + excerpt(revoke.asXml()));
+        assertTrue("Revoke".equals(revoke.getAttribute(OK_TEXT)),
+                "guard: Revoke keeps its OK text 'Revoke', was '" + revoke.getAttribute(OK_TEXT) + "'");
+        assertTrue(failures.isEmpty(), failures.size() + " of 3 Cancel controls fail:\n" + String.join("\n", failures));
     }
 
     // ---------------------------------------------------------------- helpers

@@ -236,7 +236,7 @@
         <h2>Cancel</h2>
         <bc:formError errors="${it.formErrors('cancel')}"/>
         <p>
-          <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${rootURL}/batch-control/grants/${it.id}/cancel" post="true" okText="Cancel request" title="Cancel this grant request?"
+          <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${rootURL}/batch-control/grants/${it.id}/cancel" post="true" okText="Withdraw request" title="Cancel this grant request?"
                               message="The request will be closed as CANCELLED. This cannot be undone.">
             Cancel Request
           </l:confirmationLink>
