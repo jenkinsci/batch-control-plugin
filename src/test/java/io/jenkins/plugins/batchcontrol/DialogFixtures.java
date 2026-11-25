@@ -90,7 +90,7 @@ final class DialogFixtures {
                 + " document.body.appendChild(host);"
                 + " evalInnerHtmlScripts(text, function () { Behaviour.applySubtree(host, true); });"
                 + "})();");
-        wc.waitForBackgroundJavaScript(5000);
+        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
         DomElement host = page.getElementById(HOST);
         assertNotNull(host, "fixture: the fragment must have been inserted into the job page");
         List<HtmlForm> forms = host.getByXPath(".//form");

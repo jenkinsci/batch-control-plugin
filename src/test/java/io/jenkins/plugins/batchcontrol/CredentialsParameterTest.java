@@ -114,9 +114,10 @@ public class CredentialsParameterTest {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
         HtmlForm form = TypedParameterFixtures.requestRunForm(j, wc, job);
-        wc.waitForBackgroundJavaScript(5000);
+        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
         chooseCredentials(form, CHOSEN_ID);
         TypedParameterFixtures.setValue(form, "DATE", PLAIN);
+        assertCredentialsStillSelected(form, CHOSEN_ID);
         Page answer = TypedParameterFixtures.submit(wc, form, "month-end batch with credentials", "a1");
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "the Request Run submission must succeed, got HTTP "
                 + answer.getWebResponse().getStatusCode());
@@ -137,6 +138,7 @@ public class CredentialsParameterTest {
         String id = DialogFixtures.submitThroughDialog(j, "u1", job, form -> {
             chooseCredentials(form, CHOSEN_ID);
             TypedParameterFixtures.setValue(form, "DATE", PLAIN);
+            assertCredentialsStillSelected(form, CHOSEN_ID);
         });
 
         assertMaskedRequest(id);
@@ -162,9 +164,10 @@ public class CredentialsParameterTest {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
         HtmlPage formPage = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), job.getUrl() + "build?delay=0sec"), HttpMethod.GET));
         HtmlForm form = formPage.getFormByName("parameters");
-        wc.waitForBackgroundJavaScript(5000);
+        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
         chooseCredentials(form, CHOSEN_ID);
         TypedParameterFixtures.setValue(form, "DATE", PLAIN);
+        assertCredentialsStillSelected(form, CHOSEN_ID);
         wc.getOptions().setRedirectEnabled(false);
         Page answer = j.submit(form);
 
@@ -201,16 +204,30 @@ public class CredentialsParameterTest {
         return job;
     }
 
-    /** Selects {@code id} in CRED's credentials list (filled by the credentials plugin's page script). */
-    private static void chooseCredentials(HtmlForm form, String id) {
+    /** The credentials list of CRED's parameter block. */
+    private static HtmlSelect credentialsSelect(HtmlForm form) {
         List<HtmlSelect> selects = TypedParameterFixtures.parameterBlock(form, "CRED").getByXPath(".//select");
         assertEquals(1, selects.size(), "fixture: CRED must offer one credentials list: "
                 + UsabilityFixtures.excerpt(TypedParameterFixtures.parameterBlock(form, "CRED").asXml()));
-        HtmlSelect select = selects.get(0);
+        return selects.get(0);
+    }
+
+    /** Selects {@code id} in CRED's credentials list (filled by the credentials plugin's page script). */
+    private static void chooseCredentials(HtmlForm form, String id) {
+        HtmlSelect select = credentialsSelect(form);
         assertTrue(select.getOptions().stream().map(HtmlOption::getValueAttribute).anyMatch(id::equals),
                 "fixture: the credentials list must offer " + id + ": " + UsabilityFixtures.excerpt(select.asXml()));
         select.setSelectedAttribute(id, true);
         assertEquals(id, select.getSelectedOptions().get(0).getValueAttribute(), "fixture: " + id + " must be selected");
+    }
+
+    /**
+     * The pick still holds immediately before the submit: a refill of the credentials list
+     * after the pick would silently restore the parameter's default (issue #176).
+     */
+    private static void assertCredentialsStillSelected(HtmlForm form, String id) {
+        assertEquals(id, credentialsSelect(form).getSelectedOptions().get(0).getValueAttribute(),
+                "fixture: " + id + " must still be selected at submit time, not the default");
     }
 
     private static String onlyNewRequest(Set<String> before) {
