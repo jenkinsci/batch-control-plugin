@@ -26,6 +26,7 @@ import java.util.Set;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
+import org.htmlunit.WebClient;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlOption;
@@ -114,8 +115,7 @@ public class CredentialsParameterTest {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
         HtmlForm form = TypedParameterFixtures.requestRunForm(j, wc, job);
-        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
-        chooseCredentials(form, CHOSEN_ID);
+        waitForCredentialsListAndChoose(form, CHOSEN_ID);
         TypedParameterFixtures.setValue(form, "DATE", PLAIN);
         assertCredentialsStillSelected(form, CHOSEN_ID);
         Page answer = TypedParameterFixtures.submit(wc, form, "month-end batch with credentials", "a1");
@@ -136,7 +136,7 @@ public class CredentialsParameterTest {
     public void t_05_106_credentialsParameterFromTheDialogReachesTheBuildMasked() throws Exception {
         FreeStyleProject job = credentialsJob("cred-dialog");
         String id = DialogFixtures.submitThroughDialog(j, "u1", job, form -> {
-            chooseCredentials(form, CHOSEN_ID);
+            waitForCredentialsListAndChoose(form, CHOSEN_ID);
             TypedParameterFixtures.setValue(form, "DATE", PLAIN);
             assertCredentialsStillSelected(form, CHOSEN_ID);
         });
@@ -164,8 +164,7 @@ public class CredentialsParameterTest {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
         HtmlPage formPage = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), job.getUrl() + "build?delay=0sec"), HttpMethod.GET));
         HtmlForm form = formPage.getFormByName("parameters");
-        TypedParameterFixtures.waitForBackgroundJavaScriptIdle(wc);
-        chooseCredentials(form, CHOSEN_ID);
+        waitForCredentialsListAndChoose(form, CHOSEN_ID);
         TypedParameterFixtures.setValue(form, "DATE", PLAIN);
         assertCredentialsStillSelected(form, CHOSEN_ID);
         wc.getOptions().setRedirectEnabled(false);
@@ -222,8 +221,36 @@ public class CredentialsParameterTest {
     }
 
     /**
+     * Waits until the CRED list is filled and offers {@code id} (up to 30 s), picks it, and
+     * re-checks the pick after letting the page settle: the list is filled asynchronously
+     * by the credentials plugin's page script, and a blind wait can return while the fill
+     * is still pending (issue #173, one Windows failure out of 1585 tests). Waiting for no
+     * background JavaScript at all cannot work here — these pages always keep at least one
+     * timer scheduled — so the wait is on the condition the test actually needs. A refill
+     * after the pick would silently restore the parameter's default, so the pick is checked
+     * again after the settle and immediately before the submit. Fails as a fixture error
+     * when the list never offers the id.
+     */
+    private static void waitForCredentialsListAndChoose(HtmlForm form, String id) {
+        WebClient wc = ((HtmlPage) form.getPage()).getWebClient();
+        long deadline = System.currentTimeMillis() + 30_000;
+        boolean offered = credentialsSelect(form).getOptions().stream()
+                .map(HtmlOption::getValueAttribute).anyMatch(id::equals);
+        while (!offered && System.currentTimeMillis() < deadline) {
+            wc.waitForBackgroundJavaScript(1000);
+            offered = credentialsSelect(form).getOptions().stream()
+                    .map(HtmlOption::getValueAttribute).anyMatch(id::equals);
+        }
+        assertTrue(offered, "fixture: the credentials list must offer " + id + " within 30 s: "
+                + UsabilityFixtures.excerpt(credentialsSelect(form).asXml()));
+        chooseCredentials(form, id);
+        wc.waitForBackgroundJavaScript(1000);
+        assertCredentialsStillSelected(form, id);
+    }
+
+    /**
      * The pick still holds immediately before the submit: a refill of the credentials list
-     * after the pick would silently restore the parameter's default (issue #176).
+     * after the pick would silently restore the parameter's default (issue #173).
      */
     private static void assertCredentialsStillSelected(HtmlForm form, String id) {
         assertEquals(id, credentialsSelect(form).getSelectedOptions().get(0).getValueAttribute(),
