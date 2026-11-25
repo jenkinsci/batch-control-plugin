@@ -92,11 +92,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The cache key hashes the files that decide what Maven resolves and the image's
+      # Maven line (3.9, 3.10, ...), as in build.yml's checks job (see there, #177): a
+      # cache Maven 3.10 saved makes Maven 3.9 check every artifact against the remote
+      # repositories again. Every job of this workflow runs the same Maven command, so any
+      # of them may save the cache.
+      - name: Record the Maven line for the cache key
+        run: |
+          mkdir -p target
+          mvn -B -v | sed -n 's/^Apache Maven \([0-9]*\.[0-9]*\).*/\1/p' > target/maven-line.txt
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: ${{ matrix.jdk }}
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/extensions.xml
+            .mvn/maven.config
+            target/maven-line.txt
       # To compare with ci.jenkins.io's agent when a failure looks environmental.
       - name: Show the environment
         run: |
@@ -110,14 +124,21 @@ jobs:
       # A single group can fail before any test when Maven cannot resolve an artifact it
       # only needs at run time (the git-changelist extension, a Surefire provider: #88);
       # re-runs pass for these failures, so retry the Maven invocation once when it fails
-      # with a resolution error — and only then. A real test failure still ends the step
-      # at once, because failure.ignore makes Maven exit 0 when tests fail. The
+      # with a resolution error — and only then: a line of Maven's own [ERROR]/[FATAL]
+      # output naming a resolution failure, including a 429 Too Many Requests from Maven
+      # Central (#177; the same pattern as build.yml). A real test failure still ends the
+      # step at once, because failure.ignore makes Maven exit 0 when tests fail. The retry
+      # waits 60 to 120 s first, since a 429 asks the client to slow down, and removes
+      # target/, since Maven activates the parent POM's java-level-21 profile from
+      # target/java-level/21 before "clean" runs: in the same workspace a second run checks
+      # bytecode levels and resolves jars the first run never needed (#177). The
       # two-attempt loop keeps a single copy of the command, so the retry cannot drift
       # from the first attempt.
       - name: Test
         timeout-minutes: 75
         env:
           GROUP_TESTS: ${{ matrix.tests }}
+          RESOLUTION_ERROR: '^\[(ERROR|FATAL)\] .*(could not be resolved|Could not (find|transfer) artifact|Could not resolve|Failed to (read artifact descriptor|collect dependencies)|status code: 429|Too Many Requests)'
         run: |
           attempt=0
           status=0
@@ -128,11 +149,14 @@ jobs:
             if [ "$status" -eq 0 ]; then
               break
             fi
-            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+            if ! grep -qE "$RESOLUTION_ERROR" maven.log; then
               break
             fi
             [ "$attempt" -lt 2 ] || break
-            echo "Maven failed on artifact resolution; retrying once (see #88)"
+            pause=$((60 + RANDOM % 61))
+            echo "Maven failed on artifact resolution; retrying once in $pause s (see #88, #177)"
+            sleep "$pause"
+            rm -rf target
           done
           exit "$status"
       - name: Upload surefire reports
