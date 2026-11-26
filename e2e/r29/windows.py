@@ -62,9 +62,11 @@ S  [T8] self-approval of windows: r29-dual (listed approver, may request, not an
    allowAdminSelfApproval off the administrator's request naming admin is refused and nothing is stored (guard of the
    exception); the setting is put back.
 Y  [T8] SPEC 2 ("an administrator's self-approval records selfApproved=true"): the administrator files a window request
-   on r29/self naming admin and approves it on its page; the stored request says selfApproved=true. It fails on the
-   plugin of 885834bf (jenkinsci/batch-control-plugin#182), so the CI unit r29-windows runs every section but Y
-   (ci/shard.py) until the PR that fixes #182 adds it; run without arguments, this driver runs Y too.
+   on r29/self naming admin and approves it on its page; the stored request says selfApproved=true, and the request
+   page the decision returns to has the row "Self-approved" "Yes". Guard: the administrator's request on r29/self
+   naming approver-1 only, approved by approver-1 on its page, stores no selfApproved=true and its page has no
+   "Self-approved" row. Red on main before the fix of jenkinsci/batch-control-plugin#182 (885834bf, 33e2941e: neither
+   the element nor the row); the CI unit r29-windows runs it since that fix (ci/shard.py).
 L  [T10] durations: w29's window requests on r29/dur with durationMinutes above maxGrantMinutes (241, 1440,
    99999999999), 0, -15, abc, empty and 15.5: each refused with a 4xx, nothing stored. Guard: 1 and 60 are stored with
    that duration; the 60-minute one approved lasts exactly 60 minutes (expiresAt - grantedAt); the request dialog's
@@ -539,7 +541,7 @@ def sec_S():
 def sec_Y():
     st4, r4, _ = grant_req("admin", it("self"), ["CONFIGURE"], 15, "e2e-29 T8 administrator self-approval (flag)",
                            approvers=("admin",))
-    shown = None
+    shown = dst = None
     if r4:
         _, dst, shown = lib.browser_decide("admin", r4, "approve", "e2e-29 T8 self", "R29-W-Y-01-admin-self-approved",
                                            kind="grants")
@@ -547,6 +549,47 @@ def sec_Y():
     check("Y", "[T8] SPEC 2: an administrator's self-approval is recorded as selfApproved=true (the stored request)",
           rq.get("selfApproved") == "true", children=rq.get("_children"), self_approved=rq.get("selfApproved"),
           page_says_self=bool(shown and "Self-approved" in shown))
+    # The page half: the decision posts the form and returns to the request's own page (the same browser context).
+    # Guard: the administrator's request decided by approver-1 is no self-approval, so neither the file nor the page
+    # may say so (fails if every approval, or every request of an administrator, were flagged).
+    st6, r6, _ = grant_req("admin", it("self"), ["CONFIGURE"], 15, "e2e-29 T8 administrator's request, approver-1 decides")
+    other = ost = None
+    if r6:
+        _, ost, other = lib.browser_decide("approver-1", r6, "approve", "e2e-29 T8 not self",
+                                           "R29-W-Y-02-approver-approved", kind="grants")
+    rq6 = lib.grant_request(r6) if r6 else {}
+    check("Y", "[T8] SPEC 2: the request page of the administrator's self-approved window request (the page the "
+          "Approve button returns to: its id, Approved, decided by admin) has exactly one row \"Self-approved\" with "
+          "\"Yes\"; guard: the administrator's request approved by approver-1 stores no selfApproved=true and its page "
+          "(its id, Approved, decided by approver-1) has no \"Self-approved\"",
+          self_row(shown) == ["Yes"] and decided_page(shown, r4, "admin")
+          and r6 is not None and rq6.get("status") == "APPROVED" and rq6.get("decidedBy") == "approver-1"
+          and rq6.get("selfApproved") != "true" and decided_page(other, r6, "approver-1") and "Self-approved" not in other,
+          self_row=self_row(shown), self_page=page_rows(shown), decision_status=dst,
+          guard={"submit": st6, "id": r6, "decision_status": ost, "stored": {k: rq6.get(k) for k in
+                 ("status", "requester", "decidedBy", "selfApproved")}, "page_row": self_row(other),
+                 "page": page_rows(other)})
+
+
+def row_values(text, header):
+    """The values of the summary-table rows `header` in a page's visible text (header cell, a tab, the value)."""
+    return re.findall(rf"(?m)^[ \t]*{re.escape(header)}[ \t]*:?[ \t]+(\S.*?)[ \t]*$", text or "")
+
+
+def self_row(text):
+    return row_values(text, "Self-approved")
+
+
+def page_rows(text):
+    return {h: row_values(text, h) for h in ("ID", "Status", "Decided by", "Self-approved")}
+
+
+def decided_page(text, rid, decider):
+    """True when `text` is the visible text of grant request `rid`'s page, approved and decided by `decider`."""
+    ids = [v.split()[0] for v in row_values(text, "ID")]
+    status = row_values(text, "Status")
+    return (bool(text) and ids == [rid] and len(status) == 1 and status[0].lower().startswith("approved")
+            and row_values(text, "Decided by") == [decider])
 
 
 # ---------------------------------------------------------------- L: durations (T10)
