@@ -379,6 +379,14 @@ public final class GrantRequestService {
      * the window ends at once; the request stays APPROVED and its APPROVED notice says that the
      * window ended at once and why (owner decision 2026-10-06).
      *
+     * <p>SPEC item 2, D-05 (#182): an administrator's self-approval is recorded as
+     * {@code selfApproved}, set with the other APPROVED decision fields and stored in the same write.
+     * A refused approval never stores it: every refusal before that write throws before it is set
+     * (a passed pending timeout stores EXPIRED without it), and a failed write leaves the previous
+     * file. The request object is this call's own (each call loads it from the store), so no later
+     * save can write the flag of a refused attempt. A window that ends at once (D-71c (3)) is still
+     * an approval: the request is APPROVED and keeps the flag with its other decision fields.
+     *
      * @return the created, immediately effective {@link Grant}, or the window that ended at once
      */
     public Grant approve(String id, String comment) {
@@ -401,7 +409,11 @@ public final class GrantRequestService {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
             }
-            ApprovalPolicy.checkDecision(request.getId(), request.getRequester(), request.getApprovers());
+            // SPEC item 2, D-05 (#182): an administrator's self-approval is recorded; set below with the
+            // other decision fields, so no refusal before that point (scope, pending timeout, switch) ever
+            // carries it.
+            boolean selfApproval = ApprovalPolicy.checkDecision(request.getId(), request.getRequester(),
+                    request.getApprovers());
             // S-13: re-validate the stored scope before it becomes a live grant. Creation-time
             // validation does not bind a request that was persisted earlier (or whose target has
             // since been deleted or renamed), and approval is the last point where a bad scope
@@ -440,6 +452,7 @@ public final class GrantRequestService {
                 request.setDecidedAt(now);
                 request.setDecidedBy(decidedBy);
                 request.setDecisionComment(comment);
+                request.setSelfApproved(selfApproval);
                 store.saveGrantRequest(request);
                 made[0] = Grant.createFor(request, now);
                 return made[0];

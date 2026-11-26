@@ -517,16 +517,16 @@ UNITS = [
     # form an eighth group with r29-restart as its `last` unit. Weights: a fresh local stack (2026-11-26, MacBook, Docker
     # Desktop): windows 282 s, runs 349 s, restart 74 s (its boot about 5 s); counted as 5.0, 6.2 and 2.0 for the runner,
     # whose Jenkins boots more slowly (r16-durable's restart).
-    # r29-windows runs every section but Y: Y is the red check of #182 (an administrator's self-approval of a window
-    # request records no selfApproved, SPEC 2) and joins the unit in the PR that fixes #182. windows.py without
-    # arguments runs Y too, so a local run shows the finding.
-    Unit("r29-windows", 5.0, [("r29-windows", py("r29/windows.py", "ANOBEKRSLZ"))], group="core windows and runs",
+    # r29-windows runs windows.py without arguments: every section in the driver's order, Y included. Y is the check of
+    # #182 (an administrator's self-approval of a window request stores selfApproved=true and its page says
+    # "Self-approved" "Yes", SPEC 2), red on main until the fix of #182, which put it into this unit.
+    Unit("r29-windows", 5.0, [("r29-windows", py("r29/windows.py"))], group="core windows and runs",
          doc="e2e-29: windows end to end: the expiry boundary under continuous checks (first check after expiresAt 403); "
              "DELETE only on its job and only inside the window; a CREATE window's job keeps its lock and is never run by "
              "its timer while not activated; revocation refuses the very next check and is recorded; GRANT_EXPIRING once, "
              "not before its time; no self-designation by a non-administrator, an administrator's self-approval of a window "
-             "allowed (its selfApproved record is section Y, #182, not in this unit); durations above the maximum or "
-             "malformed refused"),
+             "allowed and recorded (selfApproved=true stored, \"Self-approved\" \"Yes\" on its request page; not for "
+             "a request approver-1 decides: section Y, #182); durations above the maximum or malformed refused"),
     Unit("r29-runs", 6.2, [("r29-runs", py("r29/runs.py"))], group="core windows and runs",
          doc="e2e-29: run approval end to end: a running build survives switch toggles, a configuration save and a "
              "window's expiry; rejected and cancelled requests never run; an approver without Read still gets the run "
