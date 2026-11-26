@@ -29,7 +29,7 @@ Jenkins: `http://localhost:${BC_PORT:-8080}/`. Mail sink UI and API (mailpit):
 
 The scripted part of the e2e passes (the e2e-11 round-3 checks as `r14/round3.py`, the e2e-12 crawl with its dialog
 cycles and targeted checks, the e2e-13 role-strategy profile as `r14/role/`, the e2e-14 DEF-07 recheck and the e2e-15
-multibranch checks, the e2e-16..21 drivers) as seven independent shards, each a fixed, named group of units ("Units
+multibranch checks, the e2e-16..29 drivers) as eight independent shards, each a fixed, named group of units ("Units
 and groups" below; the GitHub Actions jobs are named after the groups, `e2e (crawl and ui checks)` and so on). Each
 shard runs on a fresh Jenkins with the JaCoCo agent in its JVM, so the run also records which plugin code it executed;
 `ci/coverage-diff.py` then lists the lines a branch changed that no scenario executed. Made for GitHub Actions (one
@@ -41,10 +41,10 @@ shard per runner); it runs the same way locally.
 mvn -ntp clean package -DskipTests                     # target/batch-control.hpi and target/classes, one build
 python3 -m venv venv && venv/bin/pip install -r e2e/ci/requirements.txt    # Python >= 3.10
 venv/bin/python -m playwright install chromium         # or BC_BROWSER_CHANNEL=chrome for the installed Chrome
-PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7              # shard 1 of 7 = group 1; artefacts in e2e/ci/out/1/ (then 2/7 ... 7/7)
+PY=$PWD/venv/bin/python e2e/ci/run.sh 1/8              # shard 1 of 8 = group 1; artefacts in e2e/ci/out/1/ (then 2/8 ... 8/8)
 python3 e2e/ci/shard.py check                          # the groups: labels, units, minutes; fails on a bad GROUPS
-python3 e2e/ci/shard.py plan 3/7                       # the steps shard 3 runs (setup, then its units)
-BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7     # the setup plus just these units
+python3 e2e/ci/shard.py plan 3/8                       # the steps shard 3 runs (setup, then its units)
+BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/8     # the setup plus just these units
 venv/bin/python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base main   # -> e2e/ci/out/coverage/summary.md
 venv/bin/python -m pytest e2e/ci/test_selftest_content.py --browser chromium   # the crawl's content checks on synthetic pages (no Jenkins)
 venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.zip    # the trace of a failed step
@@ -52,7 +52,7 @@ venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.z
 
 Against a stack that is already up (its setup done), one step or unit at a time:
 `BC_BASE=http://localhost:18080/jenkins BC_UNITS=round3 BC_SKIP_SETUP=1 venv/bin/python -m pytest e2e/ci/test_shard.py
---bc-shard 1/7 --bc-out /tmp/out -s` (add `-k round3` to select steps by name; `<k>/<N>` must name a group, `N` = 7,
+--bc-shard 1/8 --bc-out /tmp/out -s` (add `-k round3` to select steps by name; `<k>/<N>` must name a group, `N` = 8,
 also with `BC_UNITS`, which then replaces that group's units).
 
 `run.sh` uses its own compose project (`bc-cov-<k>`), its own container names and ports 18080/18025, so it can run
@@ -196,7 +196,8 @@ Every CI driver gets its browser through `r6/lib.py`, so these apply to all of t
 in order on one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account
 in between). `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins; e2e-19 added
 `r19/restart.py` to it rather than a fifth `last` unit), `r17-disk` (reloads and restarts Jenkins) and `r18-final`
-(switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
+(switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard
+(the later ones, such as `r29-restart`, say so in their `doc`).
 
 The units are split into fixed, named groups (`GROUPS` in `ci/shard.py`), one CI job each, named `e2e (<label>)`.
 Shard k of N is group k, and N must be the number of groups (`run.sh 1/5` and `--bc-shard 1/5` stop with an error
@@ -220,6 +221,11 @@ The seven groups replaced (2026-10-09) five, which took 26.9, 26.8, 26.8, 19.8 a
 37883661045 (E2E wall clock 36.7 min). The floor is group 6: approver-1, manager and nobc's job UI on both pages is
 16.6 minutes and stays in one group; the others are kept close to it. An automatic (longest-processing-time) split of
 the same weights into seven would have 15.1 minutes at most, but splits the roles' job UIs.
+
+The eighth group, `core windows and runs` (2026-11-26, e2e-29), holds `r29-windows`, `r29-runs` and `r29-restart`
+(`last`: it stops and starts Jenkins). Every other group already had its `last` unit and was at 19.4 to 22.0 minutes,
+so the e2e-29 units would have taken any of them above the heaviest. The workflow builds its matrix from
+`shard.py matrix`, so the new job needed no workflow change. `shard.py check` prints the current table.
 
 The weights were calibrated against that run at the same time: the step seconds in each shard's `summary.json`, summed
 per unit. Where the CI minutes differed from the weight by more than 0.3 min and more than 10%, the weight became the
@@ -415,8 +421,8 @@ itself did not succeed. Its log gives the reason in one line.
   its mirrors.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
-  the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
-  groups are estimated at 19.7-23.3 min per job ("Job minutes" above, `shard.py check`), the seven in parallel after
+  the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The eight
+  groups are estimated at 20-29 min per job ("Job minutes", `shard.py check`), the eight in parallel after
   `e2e build` (under 1 min), then about 1 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT`
   (default 2700 s) bounds one step.
 - Independence from the request form: `run.sh` and `shard.py` only start Jenkins, run the listed drivers and judge
@@ -463,7 +469,7 @@ Other profiles:
 | `compose.prefix.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build`; back with `docker compose up -d jenkins` | Jenkins under the context path `/jenkins` (`http://localhost:8080/jenkins/`, Jenkins URL set through `BC_JENKINS_URL`) with the new job page experiment on for every user (`-Dnew-job-page.flag.defaultValue=true`; a user can still turn it off on `/me/experiments/`) (e2e-06) |
 | `compose.jdk25.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml -f compose.jdk25.yml up -d --build` | The same image built on `jenkins/jenkins:2.568.3-lts-jdk25` (Dockerfile `ARG JENKINS_TAG`), tagged `batch-control-e2e-jenkins:2.568.3-jdk25`; shares the JENKINS_HOME volume, so `down -v` first for a fresh home (e2e-11, R4-1) |
 | `compose.ci-fs.yml` | `BC_CI_FS_DIR=<empty host directory>` with `BC_COMPOSE_EXTRA` (`ci/run.sh`) or as an extra `-f` | `JENKINS_HOME/batch-control` on the host's file system, case-insensitive on default macOS: the S-39-01 premise for `r17/s39.py` P (e2e-17) |
-| `compose.permissions.yml` | extra overlay through `BC_COMPOSE_EXTRA` (`ci/run.sh`): `BC_COMPOSE_EXTRA=$PWD/e2e/compose.permissions.yml BC_UNITS=r27-revert-permissions e2e/ci/run.sh 3/7` | Overall/Manage and Overall/SystemRead switched on by their system properties (`JENKINS_JAVA_OPTS`), as an operator does; without it `r27/revert_permissions.py` switches on what is off through the script console for its pass and says so in its arrangement check (e2e-27) |
+| `compose.permissions.yml` | extra overlay through `BC_COMPOSE_EXTRA` (`ci/run.sh`): `BC_COMPOSE_EXTRA=$PWD/e2e/compose.permissions.yml BC_UNITS=r27-revert-permissions e2e/ci/run.sh 3/8` | Overall/Manage and Overall/SystemRead switched on by their system properties (`JENKINS_JAVA_OPTS`), as an operator does; without it `r27/revert_permissions.py` switches on what is off through the script console for its pass and says so in its arrangement check (e2e-27) |
 | `compose.coverage.yml` | last overlay, after `ci/fetch-jacoco.sh`; normally through `ci/run.sh` (section below) | JaCoCo agent in the Jenkins JVM (`JAVA_TOOL_OPTIONS`), exec file `/var/jenkins_home/jacoco/jacoco-${BC_SHARD}.exec`, own container names `${BC_CONTAINER}-jenkins` / `-mail` so it can run next to the regular stack (use another `-p` project and other `BC_PORT`/`BC_MAIL_PORT`); `BC_JACOCO_AGENT=<absolute path>` when used with another checkout's compose files |
 
 The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
@@ -859,6 +865,8 @@ Java 21); under `compose.prefix.yml` it needs `BC_PREFIX=/jenkins`.
 `-e LD_PRELOAD=/usr/local/lib/libfaketime.so.1 -e "FAKETIME=@2026-10-31 14:56:30" -e FAKETIME_DONT_FAKE_MONOTONIC=1
 -e TZ=UTC` and `-Duser.timezone=Asia/Seoul` in `JAVA_OPTS` (the plugin clock is the JVM default zone), no volume for
 JENKINS_HOME, and remove it with `docker rm -f -v`. With `@` each process starts at that time and the clock runs on.
+`r29/faketime.sh` (e2e-29, local only) uses the same image through the overlay `r29/compose.faketime.yml`, with an
+offset file instead of a fixed start time, to move a running controller's clock forward (see the e2e-29 section).
 
 ## e2e-08 driver (`r8/`)
 
@@ -935,7 +943,7 @@ loads and keeps working. Verdicts `PASS h3 <check> {json}` / `FAIL h3 <check> {j
 
 Alone, without a shard: `BC_RELEASED_HPI=... venv/bin/python e2e/h3/upgrade.py` (needs `e2e/.env` and
 `target/batch-control.hpi`; about 2 to 2.5 minutes locally). In a shard: `BC_UNITS=h3-upgrade PY=$PWD/venv/bin/python
-e2e/ci/run.sh 4/7`. Not covered: an upgrade between two different code bases (on 2026-10-31 the release and `main` had
+e2e/ci/run.sh 4/8`. Not covered: an upgrade between two different code bases (on 2026-10-31 the release and `main` had
 the same `src/main`, so today the unit guards the next change), Pipeline jobs, folders, file and secret parameters
 (`r19/restart.py` covers those across a restart), role-strategy, a JCasC-configured Batch Control, retention.
 
@@ -986,8 +994,36 @@ that entry the same way; Cancel must leave a Batch Control strategy installed (O
 `r27/titles_revert.py`). The rows are judged by `ci/h1_rules.py`
 (driver `destructive`): `destructive-button`, `destructive-dialog`, and `destructive-measured` (each of the six
 controls of `DESTRUCTIVE_CONTROLS` needs a row whose probe resolves). Screenshots `R21-D-<where>-control.png` and
-`-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of
+`-dialog.png`. Alone: `BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/8` (about 6 minutes, most of
 it the shared setup).
+
+## e2e-29 driver (`r29/`): core-flow gaps
+
+Written on 2026-11-26 from a coverage inventory of the CI suite against SPEC 5-8 and 6a (time-limited permission
+windows T1-T10, run approval R1-R12, three more X1-X3): only the rows CI asserted in part or not at all got a check.
+`r29/lib.py` loads `r24/lib.py` with screenshots in `screenshots/run-29/` and rows in `r29/out/`. Every check names its
+inventory row (`[T2]`, `[R5]`) and has a guard. Each driver arranges its own items and accounts in its section A and
+puts back the global settings it changes (lead time, approver list, admin self-approval, node label, switches).
+
+| Driver | Unit (group `core windows and runs`) | Rows | Real waits |
+|---|---|---|---|
+| `windows.py` | `r29-windows` | T1 boundary (continuous checks across `expiresAt`), T2, T3 + X3 + R9 (a CREATE window's job: lock, timer never runs while not activated), T4 (revocation by the very next check, recorded), T6 (GRANT_EXPIRING not early, exactly once), T8 (self-approval rules of window requests), T10 (durations) | four one-minute windows together, the T6 timeline in a background thread (REST only), two cron ticks |
+| `runs.py` | `r29-runs` | T7 (a running build survives switch toggles, a configuration save and a window's expiry), R4, X1 (approver with Discover or nothing), R5 (approve/approve and approve/cancel races, three rounds each), R12 + X2 (deleting a job with a queued approved run; the re-created job is not activated), R11 (an approved run held in the queue past the timeout runs once) | a 120 s build, the queue hold of 130 s, one pass after the build |
+| `restart.py` | `r29-restart` (`last`) | T5: a window that expired while Jenkins was stopped is refused at the first check after the start; a running window still confers | the window's rest (about a minute) plus a boot |
+| `faketime.py` | none: local only | T9, R7: pending run, window and activation requests expire after `pendingTimeoutHours` (1) on the real clock path | about four minutes plus a boot |
+
+`windows.py` adds the accounts `w29` (RequestGrant only) and `r29-dual` (Request, RequestGrant, Approve; on the approver
+list only during its run) through the script console, so it must run before anything that restarts Jenkins in the
+same shard. `runs.py` puts the label `r29-nowhere` on the built-in node for one section and takes it off again.
+Alone, on a fresh stack: `BC_UNITS=r29-windows,r29-runs,r29-restart PY=$PWD/venv/bin/python e2e/ci/run.sh 8/8`.
+
+`faketime.py` needs a controller whose clock it can move, so it is not a CI unit. `r29/faketime.sh` builds the e2e
+image and its libfaketime variant (`faketime/Dockerfile`), starts a fresh stack with JCasC only (no CI setup, so
+`pendingTimeoutHours` stays 1) as compose project `bc-r29-ft` on ports 18090/18035 (`BC_PORT`, `BC_MAIL_PORT`), runs
+the driver and removes the stack and its volume (`BC_KEEP=1` keeps it):
+`PY=$PWD/venv/bin/python e2e/r29/faketime.sh`. libfaketime reads the offset from `r29/out/faketime/rc`, re-read at most
+once a second (`FAKETIME_CACHE_DURATION=1`); the driver writes `+3900` into it, so the controller's wall clock jumps 65
+minutes while the monotonic clock (Jenkins' timers) stays real. Nothing in JENKINS_HOME is edited.
 
 ## e2e-16 driver (`r16/`)
 
@@ -1098,7 +1134,7 @@ inheritance (administrators only) and the top-level jobs the disk scenarios remo
 
 `compose.ci-fs.yml` puts `JENKINS_HOME/batch-control` on a host directory (`BC_CI_FS_DIR`, empty at the start), which on
 macOS with Docker Desktop is case-insensitive, for the S-39-01 premise:
-`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/7`.
+`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/8`.
 
 ## e2e-15 driver (`r15/`)
 

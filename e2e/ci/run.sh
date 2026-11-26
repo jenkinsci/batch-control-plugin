@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI e2e runner: one shard of the scripted e2e pass on a fresh Jenkins with JaCoCo coverage.
 #
-#   e2e/ci/run.sh <k>/<N>          e.g. e2e/ci/run.sh 2/7
+#   e2e/ci/run.sh <k>/<N>          e.g. e2e/ci/run.sh 2/8
 #
 # Shard k is group k of ci/shard.py GROUPS (`ci/shard.py check` lists them); N must be the number of groups, checked
 # before anything starts (exit 64 otherwise).
@@ -112,6 +112,7 @@ DRIVER_OUT+=(r23/out)  # e2e-23 (bug-hunt batch A), on its own line
 DRIVER_OUT+=(r24/out)  # e2e-24 (wave A), on its own line
 DRIVER_OUT+=(r26/out)  # e2e-26 (wave B: #36, #34, #32, #33), on its own line
 DRIVER_OUT+=(h3/out)  # gap H3 (upgrade from the released plugin), on its own line
+DRIVER_OUT+=(r29/out)  # e2e-29 (core-flow gaps), on its own line
 for d in "${DRIVER_OUT[@]}"; do
   if [ -d "$E2E/$d" ] && [ -n "$(ls -A "$E2E/$d" 2>/dev/null)" ]; then mkdir -p "$prev/$(dirname "$d")"; mv "$E2E/$d" "$prev/$d"; fi
 done

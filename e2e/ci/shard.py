@@ -511,6 +511,27 @@ UNITS = [
          doc="#31: Deploy Plugin with the built .hpi on a clean controller without plugins installs Batch Control at the "
              "build's version and resolves cloudbees-folder, ionicons-api and caffeine-api from the update center; after "
              "a restart all are active and /batch-control/ answers; guard: none was there before"),
+    # e2e-29 (core-flow gap audit, 2026-11-26): the rows of the coverage inventory (permission windows T1-T10, run
+    # approval R1-R12) that no CI driver asserted, or only in part. Each driver arranges its own items (r29/, r29-*) and
+    # accounts (w29, r29-dual) and puts back what it changes globally. Every group already had its `last` unit, so they
+    # form an eighth group with r29-restart as its `last` unit. Weights: a fresh local stack (2026-11-26, MacBook, Docker
+    # Desktop): windows 282 s, runs 349 s, restart 74 s (its boot about 5 s); counted as 5.0, 6.2 and 2.0 for the runner,
+    # whose Jenkins boots more slowly (r16-durable's restart).
+    Unit("r29-windows", 5.0, [("r29-windows", py("r29/windows.py"))], group="core windows and runs",
+         doc="e2e-29: windows end to end: the expiry boundary under continuous checks (first check after expiresAt 403); "
+             "DELETE only on its job and only inside the window; a CREATE window's job keeps its lock and is never run by "
+             "its timer while not activated; revocation refuses the very next check and is recorded; GRANT_EXPIRING once, "
+             "not before its time; no self-designation by a non-administrator, an administrator's self-approval recorded; "
+             "durations above the maximum or malformed refused"),
+    Unit("r29-runs", 6.2, [("r29-runs", py("r29/runs.py"))], group="core windows and runs",
+         doc="e2e-29: run approval end to end: a running build survives switch toggles, a configuration save and a "
+             "window's expiry; rejected and cancelled requests never run; an approver without Read still gets the run "
+             "submitted; approve/approve and approve/cancel races (one decision, one build, no mixed state); deleting a "
+             "job with a queued approved run invalidates it, and the re-created job is not activated; an approved run "
+             "held in the queue past the timeout runs exactly once"),
+    Unit("r29-restart", 2.0, [("r29-restart", py("r29/restart.py"))], last=True, group="core windows and runs",
+         doc="e2e-29: a window that expired while Jenkins was stopped is refused at the first check after the start and "
+             "listed as expired; a window still running keeps conferring; stops and starts Jenkins (last)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
@@ -548,6 +569,8 @@ GROUPS = [
     ("runs and switches", [  # the run gate, reruns and the prefilled form, triggers, other plugins, the request
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r22-scripted-build", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
+    # e2e-29 (2026-11-26): the core-flow gap checks; their units name this group (group=), r29-restart is its `last`
+    ("core windows and runs", []),
 ]
 # A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
 # group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`
