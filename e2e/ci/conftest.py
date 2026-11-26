@@ -1,7 +1,7 @@
 """pytest entry point of the CI e2e pass (e2e-20). One test per step of a shard; the steps are the existing driver
 invocations of ci/shard.py, run and judged exactly as `shard.py run` does (ci/shard.py Runner).
 
-    python -m pytest e2e/ci/test_shard.py --bc-shard 2/7 --bc-out e2e/ci/out/2 --junitxml e2e/ci/out/2/junit.xml
+    python -m pytest e2e/ci/test_shard.py --bc-shard 2/8 --bc-out e2e/ci/out/2 --junitxml e2e/ci/out/2/junit.xml
 
 ci/run.sh calls it like that. The stack must be up ($BC_BASE). Retries: only the steps in shard.FLAKY carry
 @pytest.mark.flaky(reruns=1) (pytest-rerunfailures). A step after a failed setup step is skipped as BLOCKED.
