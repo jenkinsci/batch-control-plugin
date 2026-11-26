@@ -72,6 +72,10 @@
               <td style="white-space: pre-wrap;">${it.request.decisionComment}</td>
             </tr>
           </j:if>
+          <!-- #182, SPEC 2 (D-05): an administrator's self-approval, like the run request page. -->
+          <j:if test="${it.request.selfApproved}">
+            <tr><th style="text-align: left;">Self-approved</th><td>Yes</td></tr>
+          </j:if>
           <bc:idRow value="${it.id}"/>
         </tbody>
       </table>
