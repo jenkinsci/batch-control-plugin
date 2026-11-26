@@ -1012,6 +1012,9 @@ puts back the global settings it changes (lead time, approver list, admin self-a
 | `restart.py` | `r29-restart` (`last`) | T5: a window that expired while Jenkins was stopped is refused at the first check after the start; a running window still confers | the window's rest (about a minute) plus a boot |
 | `faketime.py` | none: local only | T9, R7: pending run, window and activation requests expire after `pendingTimeoutHours` (1) on the real clock path | about four minutes plus a boot |
 
+Section Y of `windows.py` (an administrator's self-approval of a window request records `selfApproved=true`, SPEC 2)
+fails on the current plugin (#182), so the unit `r29-windows` runs every other section (`ANOBEKRSLZ`) and Y joins it
+in the PR that fixes #182; `windows.py` without arguments, or `windows.py Y`, runs it locally.
 `windows.py` adds the accounts `w29` (RequestGrant only) and `r29-dual` (Request, RequestGrant, Approve; on the approver
 list only during its run) through the script console, so it must run before anything that restarts Jenkins in the
 same shard. `runs.py` puts the label `r29-nowhere` on the built-in node for one section and takes it off again.

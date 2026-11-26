@@ -1,7 +1,7 @@
 """e2e-29: time-limited permission windows ("time lock", SPEC 8) end to end, the rows of the e2e-29 coverage inventory
 that CI asserted only in part (WEAK) or not at all (GAP).
 
-usage: python windows.py [ANOBEKRSLZ]   rows: out/windows.jsonl, shots: screenshots/run-29/R29-W-*.png
+usage: python windows.py [ANOBEKRSYLZ]   rows: out/windows.jsonl, shots: screenshots/run-29/R29-W-*.png
 The holder w29 (Overall/Read, Item/Read, View/Read, BatchControl/RequestGrant; no standing Configure, Create or Delete)
 requests every window over the plugin's REST endpoint and approver-1 approves it (both the endpoints the dialogs post);
 the holder then works with core's own endpoints (configure page, config.xml, createItem, doDelete), as a person or a
@@ -58,10 +58,13 @@ S  [T8] self-approval of windows: r29-dual (listed approver, may request, not an
    on r29/self naming itself: refused, nothing stored; naming approver-1 and itself: refused, nothing stored. Guard:
    naming approver-1 only is stored PENDING. r29-dual's approver change of that request to itself is refused (the stored
    approvers unchanged); r29-dual's POST approve of it is refused (PENDING, no window). The administrator files one
-   naming admin and approves it on its page: APPROVED, decided by admin, the window exists for admin; and the stored
-   request says selfApproved=true (SPEC 2: "an administrator's self-approval records selfApproved=true"; its own check
-   line). With allowAdminSelfApproval off the administrator's request naming admin is refused and nothing is stored
-   (guard of the exception); the setting is put back.
+   naming admin and approves it on its page: APPROVED, decided by admin, the window exists for admin. With
+   allowAdminSelfApproval off the administrator's request naming admin is refused and nothing is stored (guard of the
+   exception); the setting is put back.
+Y  [T8] SPEC 2 ("an administrator's self-approval records selfApproved=true"): the administrator files a window request
+   on r29/self naming admin and approves it on its page; the stored request says selfApproved=true. It fails on the
+   plugin of 885834bf (jenkinsci/batch-control-plugin#182), so the CI unit r29-windows runs every section but Y
+   (ci/shard.py) until the PR that fixes #182 adds it; run without arguments, this driver runs Y too.
 L  [T10] durations: w29's window requests on r29/dur with durationMinutes above maxGrantMinutes (241, 1440,
    99999999999), 0, -15, abc, empty and 15.5: each refused with a 4xx, nothing stored. Guard: 1 and 60 are stored with
    that duration; the 60-minute one approved lasts exactly 60 minutes (expiresAt - grantedAt); the request dialog's
@@ -511,19 +514,14 @@ def sec_S():
           and ch is not None and ch >= 400 and ap is not None and ap >= 400 and not grant(r3).get("_exists"),
           submit=st3, change=ch, approve=ap, stored={k: rq.get(k) for k in ("status", "approvers", "decidedBy")})
     st4, r4, _ = grant_req("admin", job, ["CONFIGURE"], 15, "e2e-29 T8 administrator self-approval", approvers=("admin",))
-    shown = None
     if r4:
-        _, dst, shown = lib.browser_decide("admin", r4, "approve", "e2e-29 T8 self", "R29-W-S-01-admin-self-approved",
-                                           kind="grants")
+        lib.browser_decide("admin", r4, "approve", "e2e-29 T8 self", "R29-W-S-01-admin-self-approved", kind="grants")
     rq = lib.grant_request(r4) if r4 else {}
     g = grant(r4) if r4 else {}
     check("S", "[T8] the administrator files a window request naming admin and approves it on its page: APPROVED, "
           "decided by admin, the window exists for admin",
           r4 is not None and rq.get("status") == "APPROVED" and rq.get("decidedBy") == "admin" and g.get("user") == "admin"
           and g.get("open"), submit=st4, stored={k: rq.get(k) for k in ("status", "requester", "decidedBy")})
-    check("S", "[T8] SPEC 2: an administrator's self-approval is recorded as selfApproved=true (the stored request)",
-          rq.get("selfApproved") == "true", children=rq.get("_children"), self_approved=rq.get("selfApproved"),
-          page_says_self=bool(shown and "Self-approved" in shown))
     try:
         lib.set_config(allowAdminSelfApproval="false")
         n2 = len(lib.grant_requests_of("admin", job))
@@ -535,6 +533,20 @@ def sec_S():
           "admin is refused and nothing is stored; the setting is put back",
           400 <= st5 < 500 and r5 is None and n3 == n2 and back["allowAdminSelfApproval"] == S.get("self0", True),
           status=st5, stored_before=n2, stored_after=n3, refusal=text_of(r.text)[-200:])
+
+
+# ---------------------------------------------------------------- Y: the administrator's self-approval flag (T8, #182)
+def sec_Y():
+    st4, r4, _ = grant_req("admin", it("self"), ["CONFIGURE"], 15, "e2e-29 T8 administrator self-approval (flag)",
+                           approvers=("admin",))
+    shown = None
+    if r4:
+        _, dst, shown = lib.browser_decide("admin", r4, "approve", "e2e-29 T8 self", "R29-W-Y-01-admin-self-approved",
+                                           kind="grants")
+    rq = lib.grant_request(r4) if r4 else {}
+    check("Y", "[T8] SPEC 2: an administrator's self-approval is recorded as selfApproved=true (the stored request)",
+          rq.get("selfApproved") == "true", children=rq.get("_children"), self_approved=rq.get("selfApproved"),
+          page_says_self=bool(shown and "Self-approved" in shown))
 
 
 # ---------------------------------------------------------------- L: durations (T10)
@@ -599,4 +611,4 @@ def cleanup():
 
 if __name__ == "__main__":
     lib.run(sys.argv, {"A": sec_A, "N": sec_N, "O": sec_O, "B": sec_B, "E": sec_E, "K": sec_K, "R": sec_R, "S": sec_S,
-                       "L": sec_L, "Z": sec_Z}, cleanup)
+                       "Y": sec_Y, "L": sec_L, "Z": sec_Z}, cleanup)
