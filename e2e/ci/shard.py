@@ -524,8 +524,9 @@ UNITS = [
          doc="e2e-29: windows end to end: the expiry boundary under continuous checks (first check after expiresAt 403); "
              "DELETE only on its job and only inside the window; a CREATE window's job keeps its lock and is never run by "
              "its timer while not activated; revocation refuses the very next check and is recorded; GRANT_EXPIRING once, "
-             "not before its time; no self-designation by a non-administrator, an administrator's self-approval recorded; "
-             "durations above the maximum or malformed refused"),
+             "not before its time; no self-designation by a non-administrator, an administrator's self-approval of a window "
+             "allowed (its selfApproved record is section Y, #182, not in this unit); durations above the maximum or "
+             "malformed refused"),
     Unit("r29-runs", 6.2, [("r29-runs", py("r29/runs.py"))], group="core windows and runs",
          doc="e2e-29: run approval end to end: a running build survives switch toggles, a configuration save and a "
              "window's expiry; rejected and cancelled requests never run; an approver without Read still gets the run "
