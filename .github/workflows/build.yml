@@ -48,6 +48,12 @@ defaults:
   run:
     shell: bash
 
+# The Maven steps retry once when Maven failed on artifact resolution (#88), and only then:
+# a line of Maven's own [ERROR]/[FATAL] output naming a resolution failure, which includes a
+# 429 Too Many Requests from Maven Central (#177). One copy for both Maven steps.
+env:
+  RESOLUTION_ERROR: '^\[(ERROR|FATAL)\] .*(could not be resolved|Could not (find|transfer) artifact|Could not resolve|Failed to (read artifact descriptor|collect dependencies)|status code: 429|Too Many Requests)'
+
 jobs:
   plan:
     name: shard safeguard
@@ -77,34 +83,67 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The Maven cache (#177). A cache key is saved once and never changes, so the first
+      # job to save it decides what every later job finds in it. These two jobs save it;
+      # the test jobs and e2e.yml's build only restore it (cache-read-only), because they
+      # resolve less than these jobs do (SpotBugs and the other verify-phase plugins; the
+      # e2e build not even Surefire's runtime).
+      # The key hashes the files that decide what Maven resolves, and the Maven line (3.9,
+      # 3.10, ...) of the runner image, which this step reads with the image's own Java
+      # before setup-java computes the key. Maven 3.10 records where an artifact came from
+      # under URL-qualified keys that Maven 3.9 does not match, so on a cache Maven 3.10
+      # saved, Maven 3.9 checks every artifact against the remote repositories again, in
+      # every job: ubuntu-latest moved from Maven 3.10 to 3.9 with Ubuntu 26.04.
+      # e2e.yml and windows-tests.yml compute the key the same way; keep the three equal.
+      - name: Record the Maven line for the cache key
+        run: |
+          mkdir -p target
+          mvn -B -v | sed -n 's/^Apache Maven \([0-9]*\.[0-9]*\).*/\1/p' > target/maven-line.txt
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: ${{ matrix.jdk }}
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/extensions.xml
+            .mvn/maven.config
+            target/maven-line.txt
       # Enforcer, access-modifier checker, SpotBugs and the other verify-phase checks,
       # plus compilation of the test sources. Tests run in the test jobs.
+      # Surefire runs too, in-process (forkCount=0) and only for tests with a tag that no
+      # test has, so no test runs. It runs so that the cache this job saves holds what
+      # Surefire resolves only when it runs tests, the JUnit Platform provider and
+      # launcher; -DskipTests leaves them out and every test job fetched them from Maven
+      # Central (#177).
       # Retry once on a transient artifact-resolution failure, as in the test jobs (#88):
-      # only a resolution error retries, so a real check failure still fails at once.
-      # The two-attempt loop keeps a single copy of the command, so the retry cannot
-      # drift from the first attempt. With pipefail (the defaults above, #172), status is
-      # Maven's exit status, not tee's.
-      - name: Build and check (tests skipped)
+      # only a resolution error (RESOLUTION_ERROR above) retries, so a real check failure
+      # still fails at once. The retry waits 60 to 120 s first, since a 429 asks the
+      # client to slow down, and removes target/, since Maven activates the parent POM's
+      # java-level-21 profile from target/java-level/21 before "clean" runs: in the same
+      # workspace a second run checks bytecode levels and resolves jars the first run
+      # never needed (#177). The two-attempt loop keeps a single copy of the command, so
+      # the retry cannot drift from the first attempt. With pipefail (the defaults above,
+      # #172), status is Maven's exit status, not tee's.
+      - name: Build and check (no test runs)
         run: |
           attempt=0
           status=0
           while [ "$attempt" -lt 2 ]; do
             attempt=$((attempt + 1))
             status=0
-            mvn -B -ntp clean verify -DskipTests 2>&1 | tee maven.log || status=$?
+            mvn -B -ntp clean verify -DforkCount=0 -Dgroups=no-test-has-this-tag 2>&1 | tee maven.log || status=$?
             if [ "$status" -eq 0 ]; then
               break
             fi
-            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+            if ! grep -qE "$RESOLUTION_ERROR" maven.log; then
               break
             fi
             [ "$attempt" -lt 2 ] || break
-            echo "Maven failed on artifact resolution; retrying once (see #88)"
+            pause=$((60 + RANDOM % 61))
+            echo "Maven failed on artifact resolution; retrying once in $pause s (see #88, #177)"
+            sleep "$pause"
+            rm -rf target
           done
           exit "$status"
 
@@ -120,19 +159,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The same cache key as the checks jobs (see there, #177).
+      - name: Record the Maven line for the cache key
+        run: |
+          mkdir -p target
+          mvn -B -v | sed -n 's/^Apache Maven \([0-9]*\.[0-9]*\).*/\1/p' > target/maven-line.txt
+      # Restore only: the checks jobs save the cache, with the Surefire runtime in it.
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: ${{ matrix.jdk }}
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/extensions.xml
+            .mvn/maven.config
+            target/maven-line.txt
+          cache-read-only: true
       # The access-modifier checker runs once, in the checks job; SpotBugs is bound to
       # verify, which this job does not reach. The enforcer rules take seconds and the
       # parent POM does not honour -Denforcer.skip, so they run here too.
       # Retry once on a transient artifact-resolution failure (#88): only a resolution
-      # error retries, so a real test failure still fails the step at once. The
-      # two-attempt loop keeps a single copy of the command, so the retry cannot drift
-      # from the first attempt. With pipefail (the defaults above, #172), status is
-      # Maven's exit status, not tee's.
+      # error (RESOLUTION_ERROR above) retries, so a real test failure still fails the
+      # step at once. The retry waits 60 to 120 s and starts from an empty target/, as in
+      # the checks job (#177). The two-attempt loop keeps a single copy of the command, so
+      # the retry cannot drift from the first attempt. With pipefail (the defaults above,
+      # #172), status is Maven's exit status, not tee's.
       - name: Test
         env:
           GROUP_TESTS: ${{ matrix.tests }}
@@ -146,11 +198,14 @@ jobs:
             if [ "$status" -eq 0 ]; then
               break
             fi
-            if ! grep -qE "could not be resolved|Could not find artifact|Could not resolve" maven.log; then
+            if ! grep -qE "$RESOLUTION_ERROR" maven.log; then
               break
             fi
             [ "$attempt" -lt 2 ] || break
-            echo "Maven failed on artifact resolution; retrying once (see #88)"
+            pause=$((60 + RANDOM % 61))
+            echo "Maven failed on artifact resolution; retrying once in $pause s (see #88, #177)"
+            sleep "$pause"
+            rm -rf target
           done
           exit "$status"
       # A second guard behind the Test step's exit status (#172): fails when a class of
