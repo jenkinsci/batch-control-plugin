@@ -1,0 +1,27 @@
+# Overlay (local only, e2e-29 r29/faketime.sh): the e2e Jenkins on the libfaketime variant of the e2e image
+# (faketime/Dockerfile), with a clock offset the driver can move while Jenkins runs. Not used by CI.
+#
+#   BC_FAKETIME_DIR=<abs dir holding the file rc> docker compose -p bc-r29-ft -f docker-compose.yml \
+#     -f compose.prefix.yml -f r29/compose.faketime.yml up -d --no-build
+#
+# * FAKETIME_TIMESTAMP_FILE: libfaketime reads the offset ("+0", "+3900" seconds) from that file instead of FAKETIME,
+#   and FAKETIME_CACHE_DURATION=1 re-reads it at most once a second, so writing the file on the host moves the
+#   controller's wall clock (System.currentTimeMillis, Instant.now) at runtime. Nothing in JENKINS_HOME is edited.
+# * FAKETIME_DONT_FAKE_MONOTONIC=1: System.nanoTime, which Jenkins' timers schedule on, stays real, so the periodic
+#   work keeps its one-minute rhythm and simply sees a later wall clock.
+# * container_name: docker-compose.yml fixes `batch-control-e2e`/`-mail`; the overrides let this stack run next to
+#   another one (use other BC_PORT/BC_MAIL_PORT too).
+services:
+  jenkins:
+    image: batch-control-e2e-faketime:2.568.3
+    container_name: ${BC_CONTAINER:-bc-r29-ft}-jenkins
+    stop_grace_period: 180s
+    environment:
+      LD_PRELOAD: /usr/local/lib/libfaketime.so.1
+      FAKETIME_TIMESTAMP_FILE: /faketime/rc
+      FAKETIME_CACHE_DURATION: "1"
+      FAKETIME_DONT_FAKE_MONOTONIC: "1"
+    volumes:
+      - ${BC_FAKETIME_DIR:?set BC_FAKETIME_DIR (r29/faketime.sh does)}:/faketime:ro
+  mailpit:
+    container_name: ${BC_CONTAINER:-bc-r29-ft}-mail
