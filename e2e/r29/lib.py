@@ -2,10 +2,11 @@
 ../r24/lib.py: screenshots in screenshots/run-29/ (never committed), rows in r29/out/<driver>.jsonl.
 
 The rules of every e2e pass hold: one new browser context per page and account (real login form), the server state read
-separately (REST with basic auth; the script console only arranges state or reads it, never decides a verdict by
-changing the plugin's files). Each driver arranges its own items (named r29-*) and accounts (w29, r29-dual) idempotently
-in its first section and restores what it changes globally (configuration values, the approver list, node labels, the
-switches) in its cleanup, also after a failure. Verdict lines as in r16..r28: "PASS {...}" / "FAIL {...}" per assertion
+separately (REST with basic auth; the script console and `docker exec` only arrange state or read it, never decide a
+verdict by changing the plugin's files; windows.py F's fault changes only the modes of the store's files). Each driver
+arranges its own items (named r29-*) and accounts (w29, r29-dual) idempotently in its first section and restores what it
+changes globally (configuration values, the approver list, node labels, the switches) in its cleanup, also after a
+failure. Verdict lines as in r16..r28: "PASS {...}" / "FAIL {...}" per assertion
 (ci/shard.py fails a step on a FAIL line or a non-zero exit), "NOTE {...}" for an observation without a verdict. Every
 check names the inventory row it covers ("[T2] ...", the rows of the e2e-29 coverage inventory) and pairs a positive
 assertion with the guard that would fail if the feature were removed."""
@@ -14,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import time
 
 import requests
@@ -49,6 +51,16 @@ DUAL = "r29-dual"         # a listed approver who may also request (Request, Req
 MAIL = f"http://localhost:{os.environ.get('BC_MAIL_PORT', '8025')}"
 FOLDER_XML = L24.FOLDER_XML
 H_XML = {"Content-Type": "application/xml"}
+JH = "/var/jenkins_home"
+
+
+def dexec(*cmd, user=None, timeout=120):
+    """`docker exec` in the Jenkins container, as r23/lib.py (arrangement and evidence only: a fault on the store's
+    file modes and the probes that prove it); `user` None runs as the image's user jenkins, the controller's own.
+    Returns (rc, stdout+stderr)."""
+    args = ["docker", "exec"] + (["-u", user] if user else []) + [CONTAINER] + list(cmd)
+    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    return p.returncode, (p.stdout + p.stderr)
 
 
 # ---------------------------------------------------------------- arrangement
