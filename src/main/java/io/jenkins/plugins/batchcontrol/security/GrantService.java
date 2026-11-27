@@ -1283,11 +1283,30 @@ public final class GrantService {
      * window ends at once, with {@link Grant#REVOKED_ITEM_DELETED} as the reason and a
      * {@code GRANT_REVOKE} record, like any other end ({@link #revokeOne}).
      *
+     * <p>#184: the window's file is written before the window enters the cache. A write that fails
+     * throws with nothing in effect ({@link #registerApproved} then has its request put back); once
+     * the file is written the window exists, also for the next start, which loads the cache from
+     * those files.
+     *
      * @return {@code true} when the window is in effect; {@code false} when it ended at once because
      *         its item was deleted (the caller's APPROVED notice says so, owner decision 2026-10-06)
      */
     public synchronized boolean register(Grant grant, Item item) {
         Objects.requireNonNull(grant, "grant");
+        if (!writeNew(grant, item)) {
+            return false;
+        }
+        addToCache(grant);
+        return true;
+    }
+
+    /**
+     * The part of {@link #register} up to the window's file: follows the item's name as it is now,
+     * verifies the item (D-71c (3)) and writes the file.
+     *
+     * @return {@code true} when the file is written; {@code false} when the window ended at once
+     */
+    private synchronized boolean writeNew(Grant grant, Item item) {
         Objects.requireNonNull(item, "item");
         String current = item.getFullName();
         if (grant.getScope() != null && !current.equals(grant.getScope().getFullName())) {
@@ -1301,11 +1320,15 @@ public final class GrantService {
             return false;
         }
         save(grant);
+        return true;
+    }
+
+    /** The rest of {@link #register}: puts the written window in the cache, where it is in effect. */
+    private synchronized void addToCache(Grant grant) {
         List<Grant> grants = grants();
         grants.removeIf(existing -> existing.getId().equals(grant.getId()));
         grants.add(grant);
         reindexCreating();
-        return true;
     }
 
     /**
@@ -1321,19 +1344,43 @@ public final class GrantService {
      * off, and refuses before anything is decided or registered. No window can be registered after a
      * switch-off has returned.
      *
+     * <p>#184, all or nothing: {@code approval} writes the request APPROVED before the window's file
+     * is written, never after, because a window file whose request still says PENDING would confer
+     * the permissions while the request could be approved again, for a second window. Every
+     * exception thrown before the window's file is written (by {@code approval} itself, or a grant
+     * file that cannot be written) goes to {@code undo} under this monitor, then propagates;
+     * {@code undo} puts back what {@code approval} stored, so nothing that runs under this monitor
+     * finds the request decided without its window. Once that file is written the window exists and
+     * nothing is undone. The gap left: Jenkins stopping between the two writes leaves the request
+     * APPROVED with no window, which confers nothing (fail-closed); its requester files a new request.
+     *
      * <p>Lock order, which this method keeps acyclic: {@code policy.GrantRequestService}'s lock, then
      * this monitor, then the store. The switch-off path takes the configuration's monitor and then
-     * this monitor. Nothing that runs under this monitor (including {@code approval}) takes the
-     * configuration's monitor or {@code GrantRequestService}'s lock: the switch is a volatile read.
+     * this monitor. Nothing that runs under this monitor (including {@code approval} and {@code undo})
+     * takes the configuration's monitor or {@code GrantRequestService}'s lock: the switch is a
+     * volatile read.
      *
      * @param approval decides the request (re-checks the switch, persists the decision) and returns
      *                 the window to register; an exception it throws registers nothing
+     * @param undo     puts back what {@code approval} stored; given the exception that ended the
+     *                 registration before the window's file was written, which propagates after it
      * @return as {@link #register(Grant, Item)}
      */
-    public synchronized boolean registerApproved(Item item, java.util.function.Supplier<Grant> approval) {
+    public synchronized boolean registerApproved(Item item, java.util.function.Supplier<Grant> approval,
+                                                 java.util.function.Consumer<RuntimeException> undo) {
         Objects.requireNonNull(item, "item");
-        Grant grant = Objects.requireNonNull(approval.get(), "grant");
-        return register(grant, item);
+        Grant grant;
+        try {
+            grant = Objects.requireNonNull(approval.get(), "grant");
+            if (!writeNew(grant, item)) {
+                return false;
+            }
+        } catch (RuntimeException e) {
+            undo.accept(e);
+            throw e;
+        }
+        addToCache(grant);
+        return true;
     }
 
     /**

@@ -85,6 +85,12 @@ public final class GrantRequest {
     private List<String> approvers;
     /** The approver who approved or rejected the request (D-37); {@code null} until decided. */
     private String decidedBy;
+    /**
+     * SPEC item 2, D-05 (#182): the approval was an administrator's self-approval (the deciding
+     * approver is the requester). Recorded with the APPROVED decision only; a file written before
+     * this field existed has no element and loads as {@code false}.
+     */
+    private boolean selfApproved;
     /** D-40: optional CREATE name restriction (exact name or {@code /regex/}); {@code null} for none. */
     private String createNamePattern;
     /** D-37: approver changes, as for run requests; {@code null} until the first change. */
@@ -197,6 +203,14 @@ public final class GrantRequest {
         return decidedBy;
     }
 
+    /**
+     * Whether the approving approver was the requester (administrator self-approval, SPEC item 2,
+     * D-05, #182); {@code false} for any other decision and while undecided.
+     */
+    public boolean isSelfApproved() {
+        return selfApproved;
+    }
+
     /** D-40: the CREATE name restriction as written ({@code /regex/} or exact name), or {@code null}. */
     public String getCreateNamePattern() {
         return createNamePattern;
@@ -248,6 +262,11 @@ public final class GrantRequest {
     /** Only the policy services record the deciding approver. */
     public void setDecidedBy(String decidedBy) {
         this.decidedBy = decidedBy;
+    }
+
+    /** Only the policy services record a self-approval, with the APPROVED decision (SPEC item 2, #182). */
+    public void setSelfApproved(boolean selfApproved) {
+        this.selfApproved = selfApproved;
     }
 
     /** Only the policy services record approver changes. */

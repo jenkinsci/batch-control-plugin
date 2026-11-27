@@ -1007,14 +1007,25 @@ puts back the global settings it changes (lead time, approver list, admin self-a
 
 | Driver | Unit (group `core windows and runs`) | Rows | Real waits |
 |---|---|---|---|
-| `windows.py` | `r29-windows` | T1 boundary (continuous checks across `expiresAt`), T2, T3 + X3 + R9 (a CREATE window's job: lock, timer never runs while not activated), T4 (revocation by the very next check, recorded), T6 (GRANT_EXPIRING not early, exactly once), T8 (self-approval rules of window requests), T10 (durations) | four one-minute windows together, the T6 timeline in a background thread (REST only), two cron ticks |
+| `windows.py` | `r29-windows` | T1 boundary (continuous checks across `expiresAt`), T2, T3 + X3 + R9 (a CREATE window's job: lock, timer never runs while not activated), T4 (revocation by the very next check, recorded), T6 (GRANT_EXPIRING not early, exactly once), T8 (self-approval rules of window requests; an administrator's self-approval recorded, #182), T10 (durations), #184 (an approval whose window file cannot be written leaves its request pending) | four one-minute windows together, the T6 timeline in a background thread (REST only), two cron ticks |
 | `runs.py` | `r29-runs` | T7 (a running build survives switch toggles, a configuration save and a window's expiry), R4, X1 (approver with Discover or nothing), R5 (approve/approve and approve/cancel races, three rounds each), R12 + X2 (deleting a job with a queued approved run; the re-created job is not activated), R11 (an approved run held in the queue past the timeout runs once) | a 120 s build, the queue hold of 130 s, one pass after the build |
 | `restart.py` | `r29-restart` (`last`) | T5: a window that expired while Jenkins was stopped is refused at the first check after the start; a running window still confers | the window's rest (about a minute) plus a boot |
 | `faketime.py` | none: local only | T9, R7: pending run, window and activation requests expire after `pendingTimeoutHours` (1) on the real clock path | about four minutes plus a boot |
 
-Section Y of `windows.py` (an administrator's self-approval of a window request records `selfApproved=true`, SPEC 2)
-fails on the current plugin (#182), so the unit `r29-windows` runs every other section (`ANOBEKRSLZ`) and Y joins it
-in the PR that fixes #182; `windows.py` without arguments, or `windows.py Y`, runs it locally.
+Section Y of `windows.py` (an administrator's self-approval of a window request stores `selfApproved=true` and its
+request page shows the row "Self-approved" "Yes", SPEC 2; guard: a request approver-1 decides has neither) was red on
+main until the fix of #182, which made it part of the unit `r29-windows`: the unit runs `windows.py` without arguments,
+every section in the driver's order. `windows.py Y` runs it alone (section A first).
+Section F (#184: an approval whose window cannot be written is all or nothing) makes `batch-control/grants/` and its
+files unwritable around one approval at a time, as `r23/record_writes.py` does with `changes/`: `docker exec -u root`
+chmod 555 on the directories and 444 on the files, proved by a new file and an append refused to user `jenkins`, the
+exact modes put back after the approval (and in the cleanup). approver-1's REST approve of `w29`'s window request and
+the administrator's Approve of its own (as Y) are then refused, and each request is still PENDING as stored before, with
+no decider, comment, `selfApproved` or window, `w29` is refused the job's configure page and gets no APPROVED mail. The
+guard approves both again once the directory is writable: APPROVED with the new comment, the window open (`w29`'s
+configure page 200), one APPROVED mail, "Self-approved" "Yes". F was red on main until the fix of #184 (the request
+stored APPROVED with no window and no longer approvable) and runs last, after Z has joined the T6 thread, which
+approves windows and writes their files. `windows.py F` runs it alone (section A first).
 `windows.py` adds the accounts `w29` (RequestGrant only) and `r29-dual` (Request, RequestGrant, Approve; on the approver
 list only during its run) through the script console, so it must run before anything that restarts Jenkins in the
 same shard. `runs.py` puts the label `r29-nowhere` on the built-in node for one section and takes it off again.

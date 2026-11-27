@@ -379,6 +379,25 @@ public final class GrantRequestService {
      * the window ends at once; the request stays APPROVED and its APPROVED notice says that the
      * window ended at once and why (owner decision 2026-10-06).
      *
+     * <p>SPEC item 2, D-05 (#182): an administrator's self-approval is recorded as
+     * {@code selfApproved}, set with the other APPROVED decision fields and stored in the same write.
+     * A refused approval never stores it: every refusal before that write throws before it is set
+     * (a passed pending timeout stores EXPIRED without it), and a failed write leaves the previous
+     * file. The request object is this call's own (each call loads it from the store), so no later
+     * save can write the flag of a refused attempt. A window that ends at once (D-71c (3)) is still
+     * an approval: the request is APPROVED and keeps the flag with its other decision fields.
+     *
+     * <p>#184, all or nothing: the request is written APPROVED first and the window's file second
+     * ({@link GrantService#registerApproved} gives the reason for that order). When anything after
+     * the request's write fails before the window's file is written (a grant file that cannot be
+     * written, in practice), the request is put back exactly as it was before this call (status,
+     * decision time, decider, comment and {@code selfApproved}) and written again, under this
+     * service's lock and {@code GrantService}'s monitor, before the failure is thrown: the approver
+     * gets that failure, no APPROVED notice is sent, and the request can still be approved, rejected,
+     * cancelled or expired. If that write fails too, it is logged and added to the failure as
+     * suppressed: the request stays APPROVED with no window, which confers nothing (fail-closed), and
+     * the requester files a new request. Jenkins stopping between the two writes leaves it the same way.
+     *
      * @return the created, immediately effective {@link Grant}, or the window that ended at once
      */
     public Grant approve(String id, String comment) {
@@ -401,7 +420,11 @@ public final class GrantRequestService {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
             }
-            ApprovalPolicy.checkDecision(request.getId(), request.getRequester(), request.getApprovers());
+            // SPEC item 2, D-05 (#182): an administrator's self-approval is recorded; set below with the
+            // other decision fields, so no refusal before that point (scope, pending timeout, switch) ever
+            // carries it.
+            boolean selfApproval = ApprovalPolicy.checkDecision(request.getId(), request.getRequester(),
+                    request.getApprovers());
             // S-13: re-validate the stored scope before it becomes a live grant. Creation-time
             // validation does not bind a request that was persisted earlier (or whose target has
             // since been deleted or renamed), and approval is the last point where a bad scope
@@ -434,15 +457,26 @@ public final class GrantRequestService {
             // service's lock, then GrantService's monitor, then the store; nothing below takes the
             // configuration's monitor (the switch is a volatile read), so the switch-off path
             // (configuration monitor, then GrantService's monitor) cannot deadlock with this.
+            //
+            // #184: a failure after the request's write and before the window's file is written puts
+            // the request back as it was, under both locks; the undo takes only the store.
+            Decision before = Decision.of(request);
+            boolean[] stored = new boolean[1];
             endedAtOnce = !GrantService.get().registerApproved(item, () -> {
                 checkChangeControlEnabled("approved", request.getScope() == null ? null : request.getScope().getFullName());
                 request.setStatus(RequestStatus.APPROVED);
                 request.setDecidedAt(now);
                 request.setDecidedBy(decidedBy);
                 request.setDecisionComment(comment);
+                request.setSelfApproved(selfApproval);
                 store.saveGrantRequest(request);
+                stored[0] = true;
                 made[0] = Grant.createFor(request, now);
                 return made[0];
+            }, failure -> {
+                if (stored[0]) {
+                    putBack(request, before, failure);
+                }
             });
             Grant grant = made[0];
             if (!endedAtOnce) {
@@ -458,6 +492,42 @@ public final class GrantRequestService {
         // APPROVED (no new notice type), with one details line saying it ended at once and why.
         NotificationDispatcher.grantApproved(approved, endedAtOnce ? Grant.REVOKED_ITEM_DELETED : null);
         return created;
+    }
+
+    /** #184: the fields an approval sets, as a request had them before it. */
+    private record Decision(RequestStatus status, Instant decidedAt, String decidedBy, String comment,
+                            boolean selfApproved) {
+
+        static Decision of(GrantRequest request) {
+            return new Decision(request.getStatus(), request.getDecidedAt(), request.getDecidedBy(),
+                    request.getDecisionComment(), request.isSelfApproved());
+        }
+
+        void applyTo(GrantRequest request) {
+            request.setStatus(status);
+            request.setDecidedAt(decidedAt);
+            request.setDecidedBy(decidedBy);
+            request.setDecisionComment(comment);
+            request.setSelfApproved(selfApproved);
+        }
+    }
+
+    /**
+     * #184: puts back {@code request}, stored APPROVED by an approval whose window's file could not be
+     * written, as it was {@code before} that approval, and writes it again; see {@link #approve}. A
+     * write that fails too is logged and added to {@code failure} as suppressed.
+     */
+    private void putBack(GrantRequest request, Decision before, RuntimeException failure) {
+        before.applyTo(request);
+        try {
+            store.saveGrantRequest(request);
+        } catch (RuntimeException again) {
+            failure.addSuppressed(again);
+            LOGGER.log(java.util.logging.Level.SEVERE, again, () -> "Grant request " + request.getId() + " was stored"
+                    + " APPROVED, but its window could not be written, and the request could not be put back to "
+                    + before.status() + " either; it stays APPROVED with no window, which confers nothing, and the"
+                    + " requester has to file a new request");
+        }
     }
 
     /** Rejects a PENDING grant request; the comment is mandatory (SPEC item 5 rule reused). */

@@ -1,7 +1,7 @@
 """e2e-29: time-limited permission windows ("time lock", SPEC 8) end to end, the rows of the e2e-29 coverage inventory
 that CI asserted only in part (WEAK) or not at all (GAP).
 
-usage: python windows.py [ANOBEKRSYLZ]   rows: out/windows.jsonl, shots: screenshots/run-29/R29-W-*.png
+usage: python windows.py [ANOBEKRSYLZF]   rows: out/windows.jsonl, shots: screenshots/run-29/R29-W-*.png
 The holder w29 (Overall/Read, Item/Read, View/Read, BatchControl/RequestGrant; no standing Configure, Create or Delete)
 requests every window over the plugin's REST endpoint and approver-1 approves it (both the endpoints the dialogs post);
 the holder then works with core's own endpoints (configure page, config.xml, createItem, doDelete), as a person or a
@@ -62,17 +62,41 @@ S  [T8] self-approval of windows: r29-dual (listed approver, may request, not an
    allowAdminSelfApproval off the administrator's request naming admin is refused and nothing is stored (guard of the
    exception); the setting is put back.
 Y  [T8] SPEC 2 ("an administrator's self-approval records selfApproved=true"): the administrator files a window request
-   on r29/self naming admin and approves it on its page; the stored request says selfApproved=true. It fails on the
-   plugin of 885834bf (jenkinsci/batch-control-plugin#182), so the CI unit r29-windows runs every section but Y
-   (ci/shard.py) until the PR that fixes #182 adds it; run without arguments, this driver runs Y too.
+   on r29/self naming admin and approves it on its page; the stored request says selfApproved=true, and the request
+   page the decision returns to has the row "Self-approved" "Yes". Guard: the administrator's request on r29/self
+   naming approver-1 only, approved by approver-1 on its page, stores no selfApproved=true and its page has no
+   "Self-approved" row. Red on main before the fix of jenkinsci/batch-control-plugin#182 (885834bf, 33e2941e: neither
+   the element nor the row); the CI unit r29-windows runs it since that fix (ci/shard.py).
 L  [T10] durations: w29's window requests on r29/dur with durationMinutes above maxGrantMinutes (241, 1440,
    99999999999), 0, -15, abc, empty and 15.5: each refused with a 4xx, nothing stored. Guard: 1 and 60 are stored with
    that duration; the 60-minute one approved lasts exactly 60 minutes (expiresAt - grantedAt); the request dialog's
    duration list offers exactly 1, 15, 30, 60. A NOTE records what a length within the maximum that is not one of the
    options (7) gets: SPEC 5/8 call the options the choices and maxGrantMinutes the limit and do not say (reported).
 Z  [T6] judged (the thread started in N).
-cleanup: the lead, the approver list and allowAdminSelfApproval put back; pending requests of w29, r29-dual and admin on
-r29/ cancelled, their open windows revoked; the cron jobs r29/drop/made and made2 deleted."""
+F  [#184] SPEC 4 ("PENDING -> APPROVED(=Grant 생성)"), SPEC 8 ("승인 즉시" the requester holds the permissions): an
+   approval whose window cannot be written is all or nothing (jenkinsci/batch-control-plugin#184). The fault as
+   r23/record_writes.py arranges it, around one approval at a time: `docker exec -u root` chmod 555 on
+   batch-control/grants/ and its directories, 444 on its files, the modes recorded first; proved by a new file and an
+   append (to a probe file the store never reads, no *.xml) both refused to user jenkins, the controller's user; the
+   exact modes put back right after the approval (also on failure, and in the cleanup) and compared with the recorded
+   ones. Premise: w29's CONFIGURE window request on r29/wfail naming approver-1 and the administrator's naming admin are
+   stored PENDING, no file under grants/ names either, w29 may not configure r29/wfail. (1) approver-1's REST approve of
+   w29's request with a comment while grants/ refuses writes: not a success (400 or above); the stored request exactly
+   as before (PENDING, no decidedBy, no decision time, not the comment); w29's view of its page (browser text and the
+   HTML's status badges) Pending and not Approved, with no decider, comment or window; no file under grants/ names it;
+   w29's configure page 403 and no Configure; no APPROVED mail to w29. (2) The administrator presses Approve on its own
+   request's page (as Y) while grants/ refuses writes: not a success; the stored request as before (no selfApproved);
+   its page in a new context Pending, with no "Self-approved", "Decided by" or comment row and no window; no file names
+   it. Guard (3), grants/ writable again: approver-1 approves (1) with a new comment: APPROVED by approver-1 with that
+   comment and not the failed one, its window file, w29's configure page 200, exactly one APPROVED mail to w29 (the
+   single dispatcher sends in order, so the failed attempt queued none before it); the administrator approves (2) on
+   its page: APPROVED by admin, selfApproved=true, its window, "Self-approved" "Yes" on the page it returns to. It
+   fails if F were green only because nothing could be approved. Red on main before the fix of #184 (ee65fef1: the
+   request is stored APPROVED with the decision and no window, and cannot be approved again). Runs after Z: the T6
+   thread approves windows and writes their files until Z has joined it.
+cleanup: grants/ writable (the modes F recorded); the lead, the approver list and allowAdminSelfApproval put back;
+pending requests of w29, r29-dual and admin on r29/ cancelled, their open windows revoked (F's two among them); the
+cron jobs r29/drop/made and made2 deleted."""
 import json
 import re
 import sys
@@ -89,7 +113,7 @@ lib.LOGNAME[0] = "windows"
 F = "r29"
 DROP = "r29/drop"
 MADE, MADE2 = "r29/drop/made", "r29/drop/made2"
-JOBS = ("cfg", "del-a", "del-b", "del-other", "rev", "note", "mark-1", "mark-2", "mark-3", "self", "dur")
+JOBS = ("cfg", "del-a", "del-b", "del-other", "rev", "note", "mark-1", "mark-2", "mark-3", "self", "dur", "wfail")
 LEAD = 13          # minutes: W (15 minutes) is due 2 minutes after its approval
 CRON = "* * * * *"
 PERM = "hudson.model.Item."
@@ -539,7 +563,7 @@ def sec_S():
 def sec_Y():
     st4, r4, _ = grant_req("admin", it("self"), ["CONFIGURE"], 15, "e2e-29 T8 administrator self-approval (flag)",
                            approvers=("admin",))
-    shown = None
+    shown = dst = None
     if r4:
         _, dst, shown = lib.browser_decide("admin", r4, "approve", "e2e-29 T8 self", "R29-W-Y-01-admin-self-approved",
                                            kind="grants")
@@ -547,6 +571,47 @@ def sec_Y():
     check("Y", "[T8] SPEC 2: an administrator's self-approval is recorded as selfApproved=true (the stored request)",
           rq.get("selfApproved") == "true", children=rq.get("_children"), self_approved=rq.get("selfApproved"),
           page_says_self=bool(shown and "Self-approved" in shown))
+    # The page half: the decision posts the form and returns to the request's own page (the same browser context).
+    # Guard: the administrator's request decided by approver-1 is no self-approval, so neither the file nor the page
+    # may say so (fails if every approval, or every request of an administrator, were flagged).
+    st6, r6, _ = grant_req("admin", it("self"), ["CONFIGURE"], 15, "e2e-29 T8 administrator's request, approver-1 decides")
+    other = ost = None
+    if r6:
+        _, ost, other = lib.browser_decide("approver-1", r6, "approve", "e2e-29 T8 not self",
+                                           "R29-W-Y-02-approver-approved", kind="grants")
+    rq6 = lib.grant_request(r6) if r6 else {}
+    check("Y", "[T8] SPEC 2: the request page of the administrator's self-approved window request (the page the "
+          "Approve button returns to: its id, Approved, decided by admin) has exactly one row \"Self-approved\" with "
+          "\"Yes\"; guard: the administrator's request approved by approver-1 stores no selfApproved=true and its page "
+          "(its id, Approved, decided by approver-1) has no \"Self-approved\"",
+          self_row(shown) == ["Yes"] and decided_page(shown, r4, "admin")
+          and r6 is not None and rq6.get("status") == "APPROVED" and rq6.get("decidedBy") == "approver-1"
+          and rq6.get("selfApproved") != "true" and decided_page(other, r6, "approver-1") and "Self-approved" not in other,
+          self_row=self_row(shown), self_page=page_rows(shown), decision_status=dst,
+          guard={"submit": st6, "id": r6, "decision_status": ost, "stored": {k: rq6.get(k) for k in
+                 ("status", "requester", "decidedBy", "selfApproved")}, "page_row": self_row(other),
+                 "page": page_rows(other)})
+
+
+def row_values(text, header):
+    """The values of the summary-table rows `header` in a page's visible text (header cell, a tab, the value)."""
+    return re.findall(rf"(?m)^[ \t]*{re.escape(header)}[ \t]*:?[ \t]+(\S.*?)[ \t]*$", text or "")
+
+
+def self_row(text):
+    return row_values(text, "Self-approved")
+
+
+def page_rows(text):
+    return {h: row_values(text, h) for h in ("ID", "Status", "Decided by", "Self-approved")}
+
+
+def decided_page(text, rid, decider):
+    """True when `text` is the visible text of grant request `rid`'s page, approved and decided by `decider`."""
+    ids = [v.split()[0] for v in row_values(text, "ID")]
+    status = row_values(text, "Status")
+    return (bool(text) and ids == [rid] and len(status) == 1 and status[0].lower().startswith("approved")
+            and row_values(text, "Decided by") == [decider])
 
 
 # ---------------------------------------------------------------- L: durations (T10)
@@ -587,9 +652,241 @@ def sec_L():
           window_ms=(g60["expiresAtMillis"] - g60["grantedAtMillis"]) if g60 else None)
 
 
+# ---------------------------------------------------------------- F: an approval whose window cannot be written (#184)
+GRANTS = f"{lib.JH}/batch-control/grants"
+PROBE, NEW_PROBE = f"{GRANTS}/.r29-probe", f"{GRANTS}/r29-new-probe"   # never *.xml: the store reads only those
+MODES = {}
+APPROVED_MAIL = "Request approved"
+
+
+def grants_entries():
+    """path -> (octal mode, "d" for a directory or "f") of grants/ and everything below it."""
+    rc, out = lib.dexec("sh", "-c", f"find {GRANTS} -exec stat -c '%a %F|%n' {{}} +")
+    rows = [ln.split("|", 1) for ln in out.splitlines() if "|" in ln and ln.split(" ", 1)[0].isdigit()]
+    return {p: (h.split(" ", 1)[0], "d" if h.split(" ", 1)[1] == "directory" else "f") for h, p in rows}
+
+
+def grants_modes():
+    """path -> octal mode of grants/ and everything below it, the probe files left out."""
+    return {p: m for p, (m, _) in grants_entries().items() if p not in (PROBE, NEW_PROBE)}
+
+
+def break_grants():
+    """grants/, its directories and its files unwritable (root inside the container), the modes recorded first.
+    Returns the proof, as user jenkins: a new file in grants/ and an append to a file in it are both refused."""
+    lib.dexec("sh", "-c", f"mkdir -p {GRANTS} && printf probe > {PROBE}")
+    MODES.clear()
+    MODES.update(grants_modes())
+    lib.dexec("sh", "-c", f"find {GRANTS} -type d -exec chmod 555 {{}} + ; find {GRANTS} -type f -exec chmod 444 {{}} +",
+              user="root")
+    rc_new, _ = lib.dexec("sh", "-c", f"touch {NEW_PROBE}")
+    rc_append, _ = lib.dexec("sh", "-c", f"printf more >> {PROBE}")
+    now = grants_entries()
+    return {"new_file_refused": rc_new != 0, "append_refused": rc_append != 0, "files": sum(k == "f" for _, k in now.values()),
+            "dir_modes": sorted({m for m, k in now.values() if k == "d"}),
+            "file_modes": sorted({m for m, k in now.values() if k == "f"})}
+
+
+def in_place(proof):
+    """The fault took effect: both probes refused, every directory 555, every file (the probe at least) 444."""
+    return bool(proof) and proof["new_file_refused"] and proof["append_refused"] and proof["dir_modes"] == ["555"] \
+        and proof["file_modes"] == ["444"]
+
+
+def restore_grants():
+    """The exact modes recorded before the fault, the probe files removed; True when user jenkins can write in
+    grants/ again and every recorded mode is back."""
+    want = dict(MODES)
+    if MODES:
+        lib.dexec("sh", "-c", "; ".join(f"chmod {m} '{p}'" for p, m in MODES.items()), user="root")
+        MODES.clear()
+    lib.dexec("sh", "-c", f"rm -f {PROBE} {NEW_PROBE}", user="root")
+    rc, _ = lib.dexec("sh", "-c", f"test ! -d {GRANTS} || (touch {NEW_PROBE} && rm -f {NEW_PROBE})")
+    now = grants_modes()
+    return rc == 0 and all(now.get(p) == m for p, m in want.items())
+
+
+def faulted(action):
+    """Runs `action` while grants/ refuses writes (only when the fault is proved) and puts the modes back whatever
+    happens. Returns (proof, restored, the action's value or None)."""
+    proof = break_grants()
+    value = None
+    try:
+        if in_place(proof):
+            value = action()
+    finally:
+        back = restore_grants()
+    return proof, back, value
+
+
+def files_naming(rid):
+    """Names of the regular files under grants/ (recursively) whose text holds `rid` (a left-over temporary file too)."""
+    return lib.facts("""def d = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/grants'); def out = []
+if (d.exists()) d.eachFileRecurse(groovy.io.FileType.FILES) { f -> if (f.getText('UTF-8').contains(""" + json.dumps(rid)
+                     + """)) out << f.name }
+return groovy.json.JsonOutput.toJson(out)""")
+
+
+def badges(user, rid):
+    """(HTTP status, set of data-batch-control-status values, the HTML holds a window table) of `user`'s view of the
+    request page, server-rendered (REST)."""
+    r = api(user, f"/batch-control/grants/{rid}/")
+    return r.status_code, sorted(set(re.findall(r'data-batch-control-status="([A-Z_]+)"', r.text))), \
+        "data-batch-control-window" in r.text, r.text
+
+
+def form_errors(html):
+    """The texts of the form-level refusals (data-batch-control-form-error) in a page's markup."""
+    return [re.sub(r"\s+", " ", text_of(m)).strip() for m in
+            re.findall(r"<div[^>]*data-batch-control-form-error=[^>]*>(.*?)</div>", html or "", re.S)]
+
+
+def approved_mails(to, rid):
+    return [m for m in lib.mails_for(to, rid) if APPROVED_MAIL in (m["subject"] or "")]
+
+
+def pending_page(text, html, rid, comment):
+    """True when `text` (the visible page) and `html` (its markup) are grant request `rid`'s page, still Pending: no
+    decider, no comment row or the failed comment, no "Self-approved" row, no window, the PENDING badge only."""
+    ids = [v.split()[0] for v in row_values(text, "ID")]
+    st = row_values(text, "Status")
+    return (bool(text) and ids == [rid] and len(st) == 1 and st[0].lower().startswith("pending")
+            and not row_values(text, "Decided by") and not row_values(text, "Decision comment") and not self_row(text)
+            and comment not in text and comment not in html and "Permission Window" not in text)
+
+
+def press_approve(user, rid, comment, shot):
+    """`user` opens request `rid`'s page in a new browser context, writes `comment` and presses Approve; the fault is
+    armed only around the press. Returns (proof, restored, HTTP status of the answer, the page text and markup after
+    it)."""
+    s = Session(user, fresh=True)
+    s.go(f"/batch-control/grants/{rid}/")
+    form = s.page.locator("form[name=approve]")
+    if form.count() == 0:
+        t = s.text()
+        s.done()
+        return None, True, None, t, ""
+    form.locator("textarea[name=comment]").fill(comment)
+    s.shot("#main-panel", f"{shot}-1-request")
+
+    def press():
+        with s.page.expect_navigation(timeout=30000) as nav:
+            form.locator("button[name=Submit], button[type=submit]").first.click()
+        s.page.wait_for_load_state("load")
+        return nav.value.status if nav.value else None
+    proof, back, status_code = faulted(press)
+    t, html = s.text(), s.page.content()
+    s.shot("#main-panel", f"{shot}-2-after-approve")
+    s.done()
+    return proof, back, status_code, t, html
+
+
+def sec_F():
+    job = it("wfail")
+    st1, r1, _ = grant_req(U, job, ["CONFIGURE"], 15, "e2e-29 #184 window whose file cannot be written")
+    st2, r2, _ = grant_req("admin", job, ["CONFIGURE"], 15, "e2e-29 #184 administrator self-approval, file not written",
+                           approvers=("admin",))
+    before = {r: lib.grant_request(r) for r in (r1, r2) if r}
+    pre = {"w29 configure": status(U, J(job) + "/configure"), "w29 Configure": has_permission(U, job, PERM + "CONFIGURE"),
+           "files": {r: files_naming(r) for r in (r1, r2) if r}}
+    check("F", "[#184] premise: w29's CONFIGURE window request on r29/wfail naming approver-1 and the administrator's "
+          "naming admin are stored PENDING; no file under grants/ names either; w29 may not configure r29/wfail (403, "
+          "no Configure)",
+          r1 is not None and r2 is not None and all(before[r].get("status") == "PENDING" for r in (r1, r2))
+          and pre["w29 configure"] == 403 and not pre["w29 Configure"] and not any(pre["files"].values()),
+          submit=[st1, st2], ids=[r1, r2], stored={r: before[r].get("status") for r in before}, **pre)
+    if not (r1 and r2):
+        return
+    # (1) approver-1's REST approve while grants/ refuses writes
+    c1 = "e2e-29 #184 approver-1 approves while grants/ refuses writes"
+    t1 = time.time()
+    proof, back, r = faulted(lambda: api("approver-1", f"/batch-control/grants/{r1}/approve", "POST", data={"comment": c1}))
+    check("F", "[#184] fault around approver-1's approve: grants/ (555) and its files (444) refuse a new file and an "
+          "append to user jenkins, and afterwards every recorded mode is back and jenkins writes there again",
+          in_place(proof) and back, proof=proof, restored=back)
+    rq = lib.grant_request(r1)
+    text = lib.shot_page(U, f"/batch-control/grants/{r1}/", "R29-W-F-01-requester-pending")
+    code, marks, window, html = badges(U, r1)
+    conf = status(U, J(job) + "/configure")
+    holds = has_permission(U, job, PERM + "CONFIGURE")
+    files = files_naming(r1)
+    time.sleep(max(0.0, 8 - (time.time() - t1)))  # the single dispatch thread's quiet period
+    mails = approved_mails(f"{U}@e2e.local", r1)
+    answer = r.status_code if r is not None else None
+    check("F", "[#184] approver-1's approve of w29's PENDING window request with a comment while grants/ refuses writes "
+          "is all or nothing: not a success (400 or above); the stored request exactly as before (PENDING, no decidedBy, "
+          "no decision time, not the comment); w29's view of its page Pending and not Approved (no decider, comment or "
+          "window); no file under grants/ names it; w29's configure page 403 and no Configure; no APPROVED mail to w29",
+          answer is not None and answer >= 400 and rq == before[r1] and rq.get("status") == "PENDING"
+          and not rq.get("decidedBy") and not rq.get("decidedAtMillis") and c1 not in json.dumps(rq, ensure_ascii=False)
+          and pending_page(text, html, r1, c1) and code == 200 and marks == ["PENDING"] and not window
+          and not files and conf == 403 and not holds and not mails,
+          answer=answer, refusal=form_errors(r.text if r is not None else "")[:2],
+          stored={k: rq.get(k) for k in ("status", "decidedBy", "decidedAtMillis", "decisionComment", "selfApproved")},
+          unchanged=rq == before[r1], page=page_rows(text), badges=marks, window_table=window, files=files,
+          configure=conf, holds_configure=holds, approved_mails=[m["subject"] for m in mails])
+    # (2) the administrator's self-approval on its page while grants/ refuses writes (as Y)
+    c2 = "e2e-29 #184 admin self-approves while grants/ refuses writes"
+    proof, back, answer, after, after_html = press_approve("admin", r2, c2, "R29-W-F-02-admin-approve")
+    check("F", "[#184] fault around the administrator's Approve: grants/ (555) and its files (444) refuse a new file "
+          "and an append to user jenkins, and afterwards every recorded mode is back",
+          in_place(proof) and back, proof=proof, restored=back)
+    rq = lib.grant_request(r2)
+    text = lib.shot_page("admin", f"/batch-control/grants/{r2}/", "R29-W-F-03-admin-pending")
+    code, marks, window, html = badges("admin", r2)
+    files = files_naming(r2)
+    check("F", "[#184] the administrator's self-approval of its PENDING window request while grants/ refuses writes is "
+          "all or nothing: the Approve answer is not a success and the page it answers with says Pending, not Approved "
+          "or self-approved; the stored request exactly as before (PENDING, no selfApproved, no decidedBy, not the "
+          "comment); its page in a new context Pending, with no \"Self-approved\", \"Decided by\" or comment row and "
+          "no window; no file under grants/ names it",
+          answer is not None and answer >= 400 and [v.lower() for v in row_values(after, "Status")] == ["pending"]
+          and not self_row(after) and rq == before[r2] and rq.get("status") == "PENDING"
+          and rq.get("selfApproved") != "true" and not rq.get("decidedBy") and c2 not in json.dumps(rq, ensure_ascii=False)
+          and pending_page(text, html, r2, c2) and code == 200 and marks == ["PENDING"] and not window and not files,
+          answer=answer, refusal=form_errors(after_html)[:2], answer_page=page_rows(after),
+          stored={k: rq.get(k) for k in ("status", "decidedBy", "decidedAtMillis", "decisionComment", "selfApproved")},
+          unchanged=rq == before[r2], page=page_rows(text), badges=marks, window_table=window, files=files)
+    # (3) guard: grants/ writable again, the same two requests are approved
+    c1b = "e2e-29 #184 approver-1 approves again, grants/ writable"
+    r = api("approver-1", f"/batch-control/grants/{r1}/approve", "POST", data={"comment": c1b})
+    st = r.status_code
+    rq = lib.grant_request(r1)
+    g = grant(r1)
+    conf = status(U, J(job) + "/configure")
+    holds = has_permission(U, job, PERM + "CONFIGURE")
+    mails = lib.wait_until(lambda: approved_mails(f"{U}@e2e.local", r1), timeout=60, step=3) or []
+    time.sleep(3)
+    mails = approved_mails(f"{U}@e2e.local", r1)
+    lib.shot_page(U, f"/batch-control/grants/{r1}/", "R29-W-F-04-requester-approved")
+    check("F", "[#184] guard: with grants/ writable again approver-1 approves the same request: APPROVED by approver-1 "
+          "with the new comment and not the failed one; its window file exists and is open for w29; w29's configure page "
+          "200 and Configure held; exactly one APPROVED mail reaches w29",
+          st in (200, 302) and rq.get("status") == "APPROVED" and rq.get("decidedBy") == "approver-1"
+          and rq.get("decisionComment") == c1b and c1 not in json.dumps(rq, ensure_ascii=False)
+          and g.get("_exists") and g.get("open") and g.get("user") == U and conf == 200 and holds and len(mails) == 1,
+          approve=st, refusal=form_errors(r.text)[:2], stored={k: rq.get(k) for k in ("status", "decidedBy", "decisionComment")},
+          window={k: g.get(k) for k in ("_exists", "open", "user")}, configure=conf, holds_configure=holds,
+          approved_mails=[m["subject"] for m in mails])
+    c2b = "e2e-29 #184 admin self-approves again, grants/ writable"
+    _, dst, shown = lib.browser_decide("admin", r2, "approve", c2b, "R29-W-F-05-admin-self-approved", kind="grants")
+    rq = lib.grant_request(r2)
+    g = grant(r2)
+    check("F", "[#184] guard: with grants/ writable again the administrator approves its request on its page: APPROVED "
+          "by admin with the new comment, selfApproved=true stored, its window open for admin, and the page the "
+          "Approve button returns to has exactly one row \"Self-approved\" \"Yes\"",
+          rq.get("status") == "APPROVED" and rq.get("decidedBy") == "admin" and rq.get("decisionComment") == c2b
+          and rq.get("selfApproved") == "true" and c2 not in json.dumps(rq, ensure_ascii=False)
+          and g.get("_exists") and g.get("open") and g.get("user") == "admin"
+          and decided_page(shown, r2, "admin") and self_row(shown) == ["Yes"],
+          decision_status=dst, stored={k: rq.get(k) for k in ("status", "decidedBy", "decisionComment", "selfApproved")},
+          window={k: g.get(k) for k in ("_exists", "open", "user")}, page=page_rows(shown))
+
+
 # ---------------------------------------------------------------- cleanup
 def cleanup():
     out = {}
+    out["grants_writable"] = restore_grants()   # F puts the modes back itself; this covers a section that raised
     th = S.get("t6_thread")
     if th is not None and th.is_alive():
         th.join(timeout=420)
@@ -602,13 +899,13 @@ def cleanup():
     for u in (U, DUAL, "admin"):
         out[u] = (lib.cancel_pending(u, F + "/"), lib.revoke_open(u, F + "/"))
     out["deleted"] = {n: delete(n) for n in (MADE, MADE2)}
-    check("cleanup", "the lead, admin self-approval and the approver list are back; the window-created cron jobs are "
-          "deleted; nothing of this run is left pending or open",
-          (("lead0" not in S) or out["lead"]["notifyBeforeExpiryMinutes"] == S["lead0"])
+    check("cleanup", "grants/ is writable with the modes F recorded; the lead, admin self-approval and the approver list "
+          "are back; the window-created cron jobs are deleted; nothing of this run is left pending or open",
+          out["grants_writable"] and (("lead0" not in S) or out["lead"]["notifyBeforeExpiryMinutes"] == S["lead0"])
           and (("approvers0" not in S) or lib.approvers() == S["approvers0"]) and all(out["deleted"].values()),
           **{k: str(v)[:300] for k, v in out.items()})
 
 
 if __name__ == "__main__":
     lib.run(sys.argv, {"A": sec_A, "N": sec_N, "O": sec_O, "B": sec_B, "E": sec_E, "K": sec_K, "R": sec_R, "S": sec_S,
-                       "Y": sec_Y, "L": sec_L, "Z": sec_Z}, cleanup)
+                       "Y": sec_Y, "L": sec_L, "Z": sec_Z, "F": sec_F}, cleanup)
