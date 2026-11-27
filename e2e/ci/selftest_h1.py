@@ -208,6 +208,9 @@ def upgrade(unit):
         SKIPPED.append(("help layout", "#31 E2E-D4: the recorded help rows carry no layout (helpcheck.py measures it since "
                                        "#31), so the replay waives the required layout (ctx pre31_layout); the synthetic "
                                        "cases cover it"))
+    if d in ("role/assign_roles", "role/manage_roles"):
+        SKIPPED.append((d, "#155: the recorded rows carry no role-strategy REST snapshot (the role scripts record it since "
+                           "#148), so the replay waives it (ctx pre148_role_api); the synthetic cases cover it"))
     if d == "monitor":
         SKIPPED.append(("monitor", "T-05: the old step never had its premise (no Install control); the new step sets up "
                                    "the global matrix itself, only a new run has its rows"))
@@ -234,6 +237,8 @@ def replay(units):
             ctx = dict(ctx or {}, pre31_layout=True)
         if u["driver"] == "crawl":  # #31: the recorded crawl rows predate the design-reference scan
             ctx = dict(ctx or {}, pre31_design_ref=True)
+        if u["driver"] in ("role/assign_roles", "role/manage_roles"):  # #155: the recorded rows predate #148's REST snapshot
+            ctx = dict(ctx or {}, pre148_role_api=True)
         lines = h1.judge(u["driver"], rows, ctx).lines()
         for line in lines:
             if line.startswith("FAIL "):
@@ -315,6 +320,44 @@ def _manage_edit(change=None, **parts):
     for k, v in parts.items():
         res[k.replace("_", " ")] = dict(res[k.replace("_", " ")], **v)
     res.update(change or {})
+    return res
+
+
+ASSIGN_API_KEYS = ("0 global API", "0 item API", "1 global API", "2 item API", "3 item API", "4 item API", "5 global API")
+
+
+def _assign_roles(change=None, drop=()):
+    """assign_roles.py's res (judge_role "assign_roles") as a green run logs it; `change` replaces keys, `drop` removes
+    them (#155: the getRoleAssignments snapshots are required)."""
+    res = {"nobc rows after reload": 0, "assign GET": 200, "requests": [], "bad": [], "console": [],
+           "0 global API": {"status": 200, "roles": []}, "0 item API": {"status": 200, "roles": []},
+           "1 global API": {"status": 200, "roles": ["e2e13-global"]},
+           "2 item API": {"status": 200, "roles": ["e2e13-team", "team-all"]},
+           "3 item API": {"status": 200, "roles": ["team-all"]},
+           "4 item API": {"status": 200, "roles": []}, "5 global API": {"status": 200, "roles": []}}
+    for step, (root, item, configure) in h1.ASSIGN_TABLE.items():
+        res.update({f"{step}: nobc GET /": root, f"{step}: nobc GET team/app-1": item,
+                    f"{step}: nobc GET team/app-1/configure": configure, f"{step}: strategy": h1.RS_STRATEGY})
+    res.update(change or {})
+    for k in drop:
+        del res[k]
+    return res
+
+
+def _manage_roles(change=None, drop=()):
+    """manage_roles.py's first part (judge_role "manage_roles") as a green run logs it; `change` replaces keys, `drop`
+    removes them (#155: the getRole snapshots are required)."""
+    res = {"manage-roles GET": 200, "global role listed": 1, "item role listed": 1, "item role after reload": 1,
+           "add enabled with invalid pattern": False,
+           "server item role": "team(/.*)? [hudson.model.Item.Configure, hudson.model.Item.Read]", "strategy": h1.RS_STRATEGY,
+           "global role API": {"status": 200, "body": {"permissionIds": {"hudson.model.Hudson.Read": True}}},
+           "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
+                                                     "permissionIds": {"hudson.model.Item.Read": True,
+                                                                       "hudson.model.Item.Configure": True}}},
+           "requests": [], "bad": [], "console": []}
+    res.update(change or {})
+    for k in drop:
+        del res[k]
     return res
 
 
@@ -992,81 +1035,40 @@ def synthetic():
            "browser configure GET": 200, "browser configure save": [200, "/job/team/job/app-1/configure"],
            "description saved": "saved", "role edit bad": [], "request console": [], "approver console": [],
            "role edit console": [], "admin console": []}], {}, "pass", None),
-        ("role: Manage Roles round-trips both saved roles through role-strategy REST", "role/manage_roles",
-         [{"manage-roles GET": 200, "global role listed": 1, "item role listed": 1, "item role after reload": 1,
-           "add enabled with invalid pattern": False, "server item role": "team(/.*)? [hudson.model.Item.Configure, hudson.model.Item.Read]",
-           "strategy": h1.RS_STRATEGY,
-           "global role API": {"status": 200, "body": {"permissionIds": {"hudson.model.Hudson.Read": True}}},
-           "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
-             "permissionIds": {"hudson.model.Item.Read": True, "hudson.model.Item.Configure": True}}},
-           "requests": [], "bad": [], "console": []}], {}, "pass", None),
-        ("role: Manage Roles REST response loses a saved permission", "role/manage_roles",
-         [{"manage-roles GET": 200, "global role listed": 1, "item role listed": 1, "item role after reload": 1,
-           "add enabled with invalid pattern": False, "server item role": "team(/.*)? [hudson.model.Item.Read]",
-           "strategy": h1.RS_STRATEGY,
-           "global role API": {"status": 200, "body": {"permissionIds": {"hudson.model.Hudson.Read": True}}},
-           "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
-             "permissionIds": {"hudson.model.Item.Read": True}}},
-           "requests": [], "bad": [], "console": []}], {}, "fail", "manage"),
-        ("role: Manage Roles REST response gains an extra saved permission", "role/manage_roles",
-         [{"manage-roles GET": 200, "global role listed": 1, "item role listed": 1, "item role after reload": 1,
-           "add enabled with invalid pattern": False, "server item role": "team(/.*)? [hudson.model.Item.Build, hudson.model.Item.Configure, hudson.model.Item.Read]",
-           "strategy": h1.RS_STRATEGY,
-           "global role API": {"status": 200, "body": {"permissionIds": {"hudson.model.Hudson.Read": True}}},
-           "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
-             "permissionIds": {"hudson.model.Item.Read": True, "hudson.model.Item.Configure": True,
-                              "hudson.model.Item.Build": True}}},
-           "requests": [], "bad": [], "console": []}], {}, "fail", "manage"),
-        ("role: Assign Roles round-trips assignment and unassignment through role-strategy REST", "role/assign_roles",
-         [{"0 before: nobc GET /": 403, "0 before: nobc GET team/app-1": 403, "0 before: nobc GET team/app-1/configure": 403,
-           "1 global assigned: nobc GET /": 200, "1 global assigned: nobc GET team/app-1": 404,
-           "1 global assigned: nobc GET team/app-1/configure": 404,
-           "2 item roles e2e13-team+team-all assigned: nobc GET /": 200,
-           "2 item roles e2e13-team+team-all assigned: nobc GET team/app-1": 200,
-           "2 item roles e2e13-team+team-all assigned: nobc GET team/app-1/configure": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET /": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET team/app-1": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET team/app-1/configure": 403,
-           "4 item entry removed: nobc GET /": 200, "4 item entry removed: nobc GET team/app-1": 404,
-           "4 item entry removed: nobc GET team/app-1/configure": 404,
-           "5 global entry removed: nobc GET /": 403, "5 global entry removed: nobc GET team/app-1": 403,
-           "5 global entry removed: nobc GET team/app-1/configure": 403,
-           "0 before: strategy": h1.RS_STRATEGY, "1 global assigned: strategy": h1.RS_STRATEGY,
-           "2 item roles e2e13-team+team-all assigned: strategy": h1.RS_STRATEGY,
-           "3 e2e13-team unassigned (team-all kept): strategy": h1.RS_STRATEGY,
-           "4 item entry removed: strategy": h1.RS_STRATEGY, "5 global entry removed: strategy": h1.RS_STRATEGY,
-           "nobc rows after reload": 0, "assign GET": 200, "requests": [], "bad": [], "console": [],
-           "0 global API": {"status": 200, "roles": []}, "0 item API": {"status": 200, "roles": []},
-           "1 global API": {"status": 200, "roles": ["e2e13-global"]},
-           "2 item API": {"status": 200, "roles": ["e2e13-team", "team-all"]},
-           "3 item API": {"status": 200, "roles": ["team-all"]},
-           "4 item API": {"status": 200, "roles": []}, "5 global API": {"status": 200, "roles": []}}],
+        ("role: Manage Roles round-trips both saved roles through role-strategy REST", "role/manage_roles", [_manage_roles()],
          {}, "pass", None),
+        ("role: Manage Roles REST response loses a saved permission", "role/manage_roles",
+         [_manage_roles({"server item role": "team(/.*)? [hudson.model.Item.Read]",
+                         "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
+                                                                   "permissionIds": {"hudson.model.Item.Read": True}}}})],
+         {}, "fail", "manage"),
+        ("role: Manage Roles REST response gains an extra saved permission", "role/manage_roles",
+         [_manage_roles({"server item role": "team(/.*)? [hudson.model.Item.Build, hudson.model.Item.Configure, hudson.model.Item.Read]",
+                         "item role API": {"status": 200, "body": {"pattern": "team(/.*)?",
+                                                                   "permissionIds": {"hudson.model.Item.Read": True,
+                                                                                     "hudson.model.Item.Configure": True,
+                                                                                     "hudson.model.Item.Build": True}}}})],
+         {}, "fail", "manage"),
+        # #155: the REST snapshots are required; a driver change that stops calling getRole fails instead of passing
+        ("role: #155 Manage Roles without the getRole snapshots (the driver stopped calling the API)", "role/manage_roles",
+         [_manage_roles(drop=("global role API", "item role API"))], {}, "fail", "manage"),
+        ("role: #155 Manage Roles without the item role's getRole snapshot", "role/manage_roles",
+         [_manage_roles(drop=("item role API",))], {}, "fail", "manage"),
+        ("role: #155 Manage Roles replayed from before #148 (pre148_role_api) needs no snapshot", "role/manage_roles",
+         [_manage_roles(drop=("global role API", "item role API"))], {"pre148_role_api": True}, "pass", None),
+        ("role: #155 Manage Roles replayed from before #148 still checks a snapshot it has", "role/manage_roles",
+         [_manage_roles({"item role API": {"status": 404, "body": {}}})], {"pre148_role_api": True}, "fail", "manage"),
+        ("role: Assign Roles round-trips assignment and unassignment through role-strategy REST", "role/assign_roles",
+         [_assign_roles()], {}, "pass", None),
         ("role: Assign Roles REST API misses the item-role assignment", "role/assign_roles",
-         [{"0 before: nobc GET /": 403, "0 before: nobc GET team/app-1": 403, "0 before: nobc GET team/app-1/configure": 403,
-           "1 global assigned: nobc GET /": 200, "1 global assigned: nobc GET team/app-1": 404,
-           "1 global assigned: nobc GET team/app-1/configure": 404,
-           "2 item roles e2e13-team+team-all assigned: nobc GET /": 200,
-           "2 item roles e2e13-team+team-all assigned: nobc GET team/app-1": 200,
-           "2 item roles e2e13-team+team-all assigned: nobc GET team/app-1/configure": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET /": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET team/app-1": 200,
-           "3 e2e13-team unassigned (team-all kept): nobc GET team/app-1/configure": 403,
-           "4 item entry removed: nobc GET /": 200, "4 item entry removed: nobc GET team/app-1": 404,
-           "4 item entry removed: nobc GET team/app-1/configure": 404,
-           "5 global entry removed: nobc GET /": 403, "5 global entry removed: nobc GET team/app-1": 403,
-           "5 global entry removed: nobc GET team/app-1/configure": 403,
-           "0 before: strategy": h1.RS_STRATEGY, "1 global assigned: strategy": h1.RS_STRATEGY,
-           "2 item roles e2e13-team+team-all assigned: strategy": h1.RS_STRATEGY,
-           "3 e2e13-team unassigned (team-all kept): strategy": h1.RS_STRATEGY,
-           "4 item entry removed: strategy": h1.RS_STRATEGY, "5 global entry removed: strategy": h1.RS_STRATEGY,
-           "nobc rows after reload": 0, "assign GET": 200, "requests": [], "bad": [], "console": [],
-           "0 global API": {"status": 200, "roles": []}, "0 item API": {"status": 200, "roles": []},
-           "1 global API": {"status": 200, "roles": ["e2e13-global"]},
-           "2 item API": {"status": 200, "roles": ["team-all"]},
-           "3 item API": {"status": 200, "roles": ["team-all"]},
-           "4 item API": {"status": 200, "roles": []}, "5 global API": {"status": 200, "roles": []}}],
-         {}, "fail", "assign"),
+         [_assign_roles({"2 item API": {"status": 200, "roles": ["team-all"]}})], {}, "fail", "assign"),
+        # #155: the REST snapshots are required; a driver change that stops calling getRoleAssignments fails
+        ("role: #155 Assign Roles without the getRoleAssignments snapshots (the driver stopped calling the API)",
+         "role/assign_roles", [_assign_roles(drop=ASSIGN_API_KEYS)], {}, "fail", "assign"),
+        ("role: #155 Assign Roles without one step's getRoleAssignments snapshot", "role/assign_roles",
+         [_assign_roles(drop=("3 item API",))], {}, "fail", "assign"),
+        ("role: #155 Assign Roles replayed from before #148 (pre148_role_api) needs no snapshot", "role/assign_roles",
+         [_assign_roles(drop=ASSIGN_API_KEYS)], {"pre148_role_api": True}, "pass", None),
         ("role: Manage Roles save loses the window (200 -> 403)", "role/grant_overlay",
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
            "2 approved (window open): requester configure": 200, "3 after a Manage Roles save during the window: requester configure": 403,

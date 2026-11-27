@@ -976,12 +976,13 @@ def judge_role(name, res, ctx=None):
             "4 item API": [],
             "5 global API": [],
         }
-        # Historical baseline rows predate the REST observations. Keep those rows
-        # replayable, but require the complete API snapshot whenever any API field exists.
-        api_present = any(key in res for key in api_expected)
+        # #155: the REST snapshot is required, so a driver change that stops calling getRoleAssignments fails instead of
+        # passing silently. Only selftest_h1.py's replay of rows recorded before #148 passes pre148_role_api (and lists
+        # it as skipped); a row that has any API field is still checked in full.
+        api_checked = not (ctx or {}).get("pre148_role_api") or any(key in res for key in api_expected)
         api_got = {key: (res.get(key) or {}).get("roles") for key in api_expected}
         api_status = {key: (res.get(key) or {}).get("status") for key in api_expected}
-        api_ok = (not api_present or
+        api_ok = (not api_checked or
                   (api_got == api_expected and all(status == 200 for status in api_status.values())))
         if got != ASSIGN_TABLE or strat != {RS_STRATEGY} or res.get("nobc rows after reload") != 0 or not api_ok:
             j.fail("assign", {"table": got, "expected": ASSIGN_TABLE, "strategy": sorted(map(str, strat)),
@@ -992,20 +993,21 @@ def judge_role(name, res, ctx=None):
             j.fail("assign-requests", {"assign GET": res.get("assign GET"), "bad requests": bad_req(), "bad": res.get("bad")})
         j.console("console", res.get("console"), {"role": "admin", "page": "/manage/role-strategy/"})
     elif name == "manage_roles":
-        # The checked-in historical fixture has no REST snapshots; enforce them on
-        # current runs while allowing that pre-assertion data to be replayed.
-        api_present = "global role API" in res or "item role API" in res
+        # #155: both getRole snapshots are required, as for assign_roles above; only the replay of rows recorded before
+        # #148 (ctx pre148_role_api) may lack them.
+        api_checked = (not (ctx or {}).get("pre148_role_api")
+                       or "global role API" in res or "item role API" in res)
         global_api = res.get("global role API") or {}
         item_api = res.get("item role API") or {}
         global_body = global_api.get("body") or {}
         item_body = item_api.get("body") or {}
         global_permissions = global_body.get("permissionIds", {})
         item_permissions = item_body.get("permissionIds", {})
-        global_api_ok = (not api_present or
+        global_api_ok = (not api_checked or
                          (global_api.get("status") == 200
                           and set(global_permissions) == {"hudson.model.Hudson.Read"}
                           and global_permissions.get("hudson.model.Hudson.Read") is True))
-        item_api_ok = (not api_present or
+        item_api_ok = (not api_checked or
                        (item_api.get("status") == 200 and item_body.get("pattern") == "team(/.*)?"
                         and set(item_permissions) == {"hudson.model.Item.Read", "hudson.model.Item.Configure"}
                         and item_permissions.get("hudson.model.Item.Read") is True
