@@ -13,6 +13,34 @@
 
 ---
 
+## 2026-11-27 — Core window and run e2e checks (#183), #182 and #184 fixed, matrix rows (#188)
+- The entries between 2026-11-06 and this one were not written here. The pull requests merged in that period are their record.
+- Delegated:
+  - e2e-tester ← an inventory of the core window and run scenarios, and CI checks for the weak and missing ones;
+  - test-author ← the red tests for #182 and #184, and the matrix rows;
+  - core-dev ← the #182 and #184 fixes;
+  - ui-dev ← the #182 "Self-approved" row;
+  - release-manager ← the LIMITATIONS 11 paragraph for #184.
+- Results:
+  - #183 (33e2941e): e2e-29, three units in a new eighth CI group, "core windows and runs".
+    - `r29-windows`, `r29-runs` and `r29-restart` passed 28, 19 and 5 checks.
+    - T9 and R7 run only locally, with libfaketime (`e2e/r29/faketime.sh`): 7 of 7, twice.
+  - #185 (ee65fef1), fixes #182: an administrator's self-approval of a window is stored as `selfApproved` and shown on the request page.
+    - T-02-208..214, note 378, `windows.py` Y.
+  - #187 (2b7e4b1c), fixes #184: an approval whose window file cannot be written leaves its request exactly as before, PENDING.
+    - T-02-215..219, note 379, `windows.py` F, LIMITATIONS 11.
+    - The upstream e2e run hit HTTP 429 from Maven Central while fetching the JaCoCo agent. The two jobs were rerun and passed.
+  - #188 (0d4ee913): T-E2E-63..81 and note 380 for the e2e-29 checks.
+  - Each fix was red on main and green on its branch, in JenkinsRule and in e2e. Fork CI and upstream CI were green before each merge.
+- Waiting on the human:
+  - SPEC 3's data model does not list `selfApproved` for GrantRequest yet (#147).
+  - #147: whether a POSTed duration that is not in the list but is within the maximum is refused.
+- Not covered:
+  - The undo's own write failure in #184.
+  - A Jenkins stop between the two writes of an approval. It fails closed, and LIMITATIONS 11 says so.
+  - The e2e-29 open points in note 380.
+- Not done: #163 (fork PR open, no upstream PR), #164 onward and #180 are on hold until the human resumes them.
+
 ## 2026-11-06 — #31 stage three: legacy e2e drivers replaced by CI checks and JenkinsRule rows
 - The entries between 2026-10-18 and this one were not written here. The pull requests merged in that period are its record.
 - **Merged for #31, 2026-11-05 to 11-06.** Each guard went red with its defect put back in `src/main` before it was merged. The CI e2e guards ran green three times on the fork.
