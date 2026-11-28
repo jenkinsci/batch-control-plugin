@@ -247,6 +247,18 @@ newer sections in English.
     `RENAME` or `MOVE` record and in later records of the window, as for any
     other item (item 19).
 
+    Approving a window writes its grant request first and the window's grant
+    file second. If the grant file cannot be written (for example, when
+    `batch-control/grants/` refuses writes), the approval fails as a whole:
+    the approver sees the error, no approval notification is sent, and the
+    request is written back exactly as it was, still `PENDING`. It can still
+    be rejected, cancelled or left to expire, and it can be approved once the
+    directory accepts writes again. Two cases leave the request `APPROVED`
+    with no window: Jenkins stopping between the two writes, and a request
+    file that cannot be written back either (logged as SEVERE with the
+    request's id). Neither confers anything; the requester files a new
+    request (issue #184).
+
     Ending a window is built to survive a failed write and a restart. The
     window is marked ended in memory first, so it stops applying at once; then
     a `GRANT_REVOKE` record is appended under `batch-control/changes/` and the
