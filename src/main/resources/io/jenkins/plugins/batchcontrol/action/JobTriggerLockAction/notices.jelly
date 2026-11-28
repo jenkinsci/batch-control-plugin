@@ -26,7 +26,7 @@
         </j:if>
       </ul>
       <p class="jenkins-!-margin-0">
-        To clear it, turn the switch off in the Batch Control section of the
+        To clear it, uncheck <b>Block cron (timer) triggers</b> or <b>Block upstream triggers</b> in the
         <j:choose>
           <j:when test="${it.canConfigure}"><a href="${rootURL}/${it.job.url}configure">job configuration</a>.</j:when>
           <j:otherwise>job configuration.</j:otherwise>
