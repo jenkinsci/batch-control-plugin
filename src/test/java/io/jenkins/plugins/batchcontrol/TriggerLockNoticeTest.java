@@ -14,6 +14,7 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.DomNode;
+import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,14 +31,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 6, "when {@code blockTimer} or {@code blockUpstream} is on for a job, the job page
  * shows a notice naming the switch that blocks it and how to clear it (the job configuration,
  * which is change-controlled), to users who can read the job. The notice is absent when both are
- * off or when run control is off. (#21)". Matrix rows T-06-49, T-06-50 (note 86).
+ * off or when run control is off. (#21)". Matrix rows T-06-49, T-06-50 (note 86) and T-06-114
+ * (issue #152, note 381).
  *
  * <p>The switch is recognised by its name, either the field name ({@code blockTimer},
  * {@code blockUpstream}) or its label ("Block timer", "Block upstream"), case-insensitively.
  * The viewer is a plain reader (Jenkins/Read + Item/Read), who has no Configure link in the
- * sidebar, so the "how to clear it" half is measured inside the notice itself.
+ * sidebar, so the "how to clear it" half is measured inside the notice itself. T-06-114 also
+ * reads the page as a user who may configure the job, to check that the how-to-clear sentence
+ * still links the configure page.
  *
- * Written from docs/SPEC.md, issue #21 and docs/TEST-MATRIX.md only (no src/main knowledge).
+ * Written from docs/SPEC.md, issues #21 and #152, and docs/TEST-MATRIX.md only (no src/main
+ * knowledge).
  */
 @WithJenkins
 public class TriggerLockNoticeTest {
@@ -61,9 +66,12 @@ public class TriggerLockNoticeTest {
     }
 
     /**
-     * T-06-49 (#21): a reader of a job with blockTimer on sees a notice naming blockTimer (and
-     * not blockUpstream) that points at the job configuration; with blockUpstream on, the notice
-     * names blockUpstream (and not blockTimer); with both on, both are named.
+     * T-06-49 (#21, #152): a reader of a job with blockTimer on sees a notice naming blockTimer
+     * (and not blockUpstream) that points at the job configuration; with blockUpstream on, the
+     * notice names blockUpstream (and not blockTimer); with both on, both are named.
+     *
+     * <p>The "on / not off" half is read from the status part of the notice (the text before how
+     * to clear it). The how-to-clear sentence may name both field titles (T-06-114).
      */
     @Test
     public void t_06_49_jobPageNoticeNamesTheBlockingSwitch() throws Exception {
@@ -72,17 +80,19 @@ public class TriggerLockNoticeTest {
         job("notice-both", true, true);
 
         String timer = jobText("notice-timer");
-        assertTrue(TIMER.matcher(timer).find(), "the job page must name blockTimer while it is on: " + excerpt(timer));
-        assertFalse(UPSTREAM.matcher(timer).find(), "blockUpstream is off and must not be named: " + excerpt(timer));
+        String timerStatus = statusText(timer);
+        assertTrue(TIMER.matcher(timerStatus).find(), "the job page must name blockTimer while it is on: " + excerpt(timer));
+        assertFalse(UPSTREAM.matcher(timerStatus).find(), "blockUpstream is off and must not be named as on: " + excerpt(timer));
         assertNoticeExplainsHowToClear("notice-timer", TIMER);
 
         String upstream = jobText("notice-upstream");
-        assertTrue(UPSTREAM.matcher(upstream).find(), "the job page must name blockUpstream while it is on: " + excerpt(upstream));
-        assertFalse(TIMER.matcher(upstream).find(), "blockTimer is off and must not be named: " + excerpt(upstream));
+        String upstreamStatus = statusText(upstream);
+        assertTrue(UPSTREAM.matcher(upstreamStatus).find(), "the job page must name blockUpstream while it is on: " + excerpt(upstream));
+        assertFalse(TIMER.matcher(upstreamStatus).find(), "blockTimer is off and must not be named as on: " + excerpt(upstream));
         assertNoticeExplainsHowToClear("notice-upstream", UPSTREAM);
 
         String both = jobText("notice-both");
-        assertTrue(TIMER.matcher(both).find() && UPSTREAM.matcher(both).find(),
+        assertTrue(TIMER.matcher(statusText(both)).find() && UPSTREAM.matcher(statusText(both)).find(),
                 "with both switches on the notice must name both: " + excerpt(both));
     }
 
@@ -118,6 +128,32 @@ public class TriggerLockNoticeTest {
                 "control: the same job shows the notice once run control is on: " + excerpt(rcOn));
     }
 
+    /**
+     * T-06-114 (#152): the how-to-clear sentence names the two job-configuration field titles
+     * ("Block cron (timer) triggers" and "Block upstream triggers") and does not point at a
+     * "Batch Control section". A reader is not linked to the configure page; a user who may
+     * configure the job is linked to it from that sentence.
+     *
+     * <p>The fixture is a job with only blockTimer on, so both titles can appear together only
+     * in the how-to-clear sentence (the status list names only the switch that is on).
+     */
+    @Test
+    public void t_06_114_noticeNamesTheJobConfigurationFieldTitles() throws Exception {
+        job("notice-titles", true, false);
+
+        HtmlPage readerPage = jobPage("notice-titles");
+        assertHowToClearNamesFieldTitles(readerPage);
+        assertFalse(howToClearLinksToConfigure(readerPage, "notice-titles"),
+                "a reader must not be linked to the configure page from the how-to-clear sentence: "
+                        + excerpt(readerPage.asNormalizedText()));
+
+        HtmlPage configurerPage = jobPage("notice-titles", "admin");
+        assertHowToClearNamesFieldTitles(configurerPage);
+        assertTrue(howToClearLinksToConfigure(configurerPage, "notice-titles"),
+                "a user who may configure the job must be linked to the configure page from the how-to-clear sentence: "
+                        + excerpt(configurerPage.asNormalizedText()));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void job(String name, boolean blockTimer, boolean blockUpstream) throws Exception {
@@ -131,14 +167,89 @@ public class TriggerLockNoticeTest {
     }
 
     private HtmlPage jobPage(String name) throws Exception {
-        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("reader");
+        return jobPage(name, "reader");
+    }
+
+    private HtmlPage jobPage(String name, String user) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
         HtmlPage page = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), "job/" + name + "/"), HttpMethod.GET));
-        assertEquals(200, page.getWebResponse().getStatusCode(), "the reader must reach job/" + name + "/");
+        assertEquals(200, page.getWebResponse().getStatusCode(), user + " must reach job/" + name + "/");
         return page;
     }
 
     private String jobText(String name) throws Exception {
         return jobPage(name).asNormalizedText();
+    }
+
+    /**
+     * The status part of the notice: the visible text before how to clear it. If that sentence
+     * is missing, the whole page is used, so an always-absent how-to-clear sentence cannot hide
+     * an off switch being named as on.
+     */
+    private static String statusText(String pageText) {
+        int cut = pageText.toLowerCase(Locale.ROOT).indexOf("to clear it");
+        return cut < 0 ? pageText : pageText.substring(0, cut);
+    }
+
+    private static void assertHowToClearNamesFieldTitles(HtmlPage page) {
+        String howToClear = howToClearText(page);
+        assertTrue(howToClear.contains("Block cron (timer) triggers"),
+                "the how-to-clear sentence must name 'Block cron (timer) triggers': " + excerpt(howToClear));
+        assertTrue(howToClear.contains("Block upstream triggers"),
+                "the how-to-clear sentence must name 'Block upstream triggers': " + excerpt(howToClear));
+        assertFalse(howToClear.contains("Batch Control section"),
+                "the how-to-clear sentence must not point at a 'Batch Control section': " + excerpt(howToClear));
+    }
+
+    private static String howToClearText(HtmlPage page) {
+        DomElement element = howToClearElement(page);
+        assertTrue(element != null, "the notice must say how to clear the block: " + excerpt(page.asNormalizedText()));
+        return element.getTextContent();
+    }
+
+    /** The innermost element whose visible text contains "To clear it". */
+    private static DomElement howToClearElement(HtmlPage page) {
+        List<DomElement> candidates = page.getByXPath("//body//*[not(self::script) and not(self::style)]");
+        for (DomElement element : candidates) {
+            String own = element.getTextContent();
+            if (own == null || !own.toLowerCase(Locale.ROOT).contains("to clear it")) {
+                continue;
+            }
+            if (hasChildContaining(element, "to clear it")) {
+                continue;
+            }
+            return element;
+        }
+        return null;
+    }
+
+    private static boolean howToClearLinksToConfigure(HtmlPage page, String name) throws Exception {
+        DomElement element = howToClearElement(page);
+        if (element == null) {
+            return false;
+        }
+        String marker = "/job/" + name + "/configure";
+        for (DomElement child : element.getElementsByTagName("a")) {
+            if (!(child instanceof HtmlAnchor)) {
+                continue;
+            }
+            String href = ((HtmlAnchor) child).getHrefAttribute();
+            if (href != null && page.getFullyQualifiedUrl(href).getPath().contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasChildContaining(DomElement element, String phrase) {
+        String needle = phrase.toLowerCase(Locale.ROOT);
+        for (DomElement child : element.getChildElements()) {
+            String text = child.getTextContent();
+            if (text != null && text.toLowerCase(Locale.ROOT).contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The element naming the switch, or one of its three nearest ancestors, points at the job configuration. */
