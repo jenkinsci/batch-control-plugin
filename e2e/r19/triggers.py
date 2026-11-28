@@ -6,8 +6,10 @@ T  r19-cron (timer every minute, created under run control: blockTimer, blockUps
       and the activation notice "not activated" (SPEC 6 #21, 6a)
    2. the next minute's timer run is refused: no build, and a TRIGGER_BLOCKED record names the job, the cause kind and
       blockTimer (SPEC 6 #21)
-   3. the administrator clears blockTimer: the notice no longer names it, and the next minute still starts nothing,
-      because the job is not activated (SPEC 6a D-46: clearing a switch never lets a non-activated job run)
+   3. the administrator clears blockTimer: the status part of the notice (the text before how to clear it)
+      no longer names it; the how-to-clear sentence may still name both field titles (T-06-114). The next
+      minute still starts nothing, because the job is not activated (SPEC 6a D-46: clearing a switch never
+      lets a non-activated job run)
    4. requester asks for activation, approver-1 approves it in the browser: an ACTIVATED record, the job page says
       "activated", and the next minute's timer run starts with the timer cause; runs.csv lists it with cause TIMER
       (SPEC 6 "cron passes by default", 6a, SPEC 10 cause classes)
@@ -55,6 +57,16 @@ def notice(user, job, shot):
     return t
 
 
+def status_text(page_text):
+    """The status part of the trigger-lock notice: the visible text before how to clear it.
+
+    If that sentence is missing, the whole page is used, so an always-absent how-to-clear
+    sentence cannot hide an off switch being named as on (same rule as T-06-49).
+    """
+    cut = page_text.lower().find("to clear it")
+    return page_text if cut < 0 else page_text[:cut]
+
+
 def activate(job, action="ACTIVATE", tag="T"):
     st, aid = act_req("requester", job, action, f"e2e-19 {action} {job}")
     assert aid, (job, action, st)
@@ -80,7 +92,9 @@ def sec_T():
           next_build(job) == nb0 and len(hour) == 1, next_build=next_build(job), records=[(x.get("detail") or "")[:200] for x in hour][:3])
     set_property(job, approval=True, timer=False, upstream=True)
     t = notice("requester", job, "R19-TRIG-T-02-timer-cleared")
-    check("T", "blockTimer cleared: the notice no longer names it", "Block cron (timer) triggers" not in t and "Block upstream triggers" in t)
+    status = status_text(t)
+    check("T", "blockTimer cleared: the status part of the notice no longer names it",
+          "Block cron (timer) triggers" not in status and "Block upstream triggers" in status)
     wait_next_tick()
     check("T", "blockTimer cleared but not activated: the timer still starts nothing (SPEC 6a D-46)", next_build(job) == nb0,
           next_build=next_build(job))
