@@ -280,7 +280,7 @@ public class JobRunSidebarEntryTest {
                 + ": the redirect must carry the typed value: " + location);
 
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
-        org.htmlunit.Page landing = wc.getPage(to);
+        org.htmlunit.Page landing = PageScriptFixtures.settled(wc.getPage(to));
         assertEquals(200, landing.getWebResponse().getStatusCode(), target.getFullName() + ": the Request Run form must open");
         assertTrue(landing instanceof HtmlPage, target.getFullName() + ": the Request Run form must be HTML");
         HtmlPage page = (HtmlPage) landing;
@@ -297,7 +297,7 @@ public class JobRunSidebarEntryTest {
     private org.htmlunit.Page submitParameters(String userId, String absoluteHref, String date, boolean followRedirects)
             throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
-        HtmlPage formPage = (HtmlPage) wc.getPage(new URL(absoluteHref));
+        HtmlPage formPage = PageScriptFixtures.settled((HtmlPage) wc.getPage(new URL(absoluteHref)));
         org.htmlunit.html.HtmlForm form = formPage.getFormByName("parameters");
         if (date != null) {
             List<org.htmlunit.html.HtmlInput> inputs = form.getByXPath(

@@ -342,6 +342,7 @@ public class DialogTypedParameterTest {
     // ---------------------------------------------------------------- helpers
 
     private static List<HtmlElement> fileControls(HtmlElement scope) {
+        PageScriptFixtures.settled(scope.getPage());
         return scope.getByXPath(".//input[translate(@type,'FILE','file')='file']");
     }
 

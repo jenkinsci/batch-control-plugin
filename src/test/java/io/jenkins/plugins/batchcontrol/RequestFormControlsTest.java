@@ -199,7 +199,7 @@ public class RequestFormControlsTest {
         UsabilityFixtures.setField(again, "reason", "typed, then cancelled");
         UsabilityFixtures.tickApprovers(again, "a1");
         Page answer = HtmlFormUtil.submit(again);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "guard: the submitted form must succeed, got "
                 + answer.getWebResponse().getStatusCode());
         Set<String> after = ApproverFormFixtures.runRequestIds();

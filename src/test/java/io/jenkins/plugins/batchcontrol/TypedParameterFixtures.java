@@ -172,7 +172,7 @@ final class TypedParameterFixtures {
 
     /** The Request Run form of {@code job} as {@code wc}'s user sees it on {@code job/<name>/batch-control/}. */
     static HtmlForm requestRunForm(JenkinsRule j, JenkinsRule.WebClient wc, Job<?, ?> job) throws Exception {
-        Page page = wc.getPage(new URL(j.getURL(), job.getUrl() + "batch-control/"));
+        Page page = PageScriptFixtures.settled(wc.getPage(new URL(j.getURL(), job.getUrl() + "batch-control/")));
         assertEquals(200, page.getWebResponse().getStatusCode(), "fixture: the Request Run page of "
                 + job.getFullName() + " must open");
         assertTrue(page instanceof HtmlPage, "fixture: the Request Run page must be HTML");
@@ -184,8 +184,13 @@ final class TypedParameterFixtures {
         return form;
     }
 
-    /** Core's {@code <div name="parameter">} block of the job parameter {@code name}. */
+    /**
+     * Core's {@code <div name="parameter">} block of the job parameter {@code name}. Waits for the
+     * page's background JavaScript first ({@link PageScriptFixtures#settled}), whichever fixture or
+     * test loaded the page and whatever script the last change of a control started.
+     */
     static HtmlElement parameterBlock(HtmlForm form, String name) {
+        PageScriptFixtures.settled(form.getPage());
         List<HtmlElement> blocks = form.getByXPath(
                 ".//*[@name='parameter'][.//input[@name='name' and @value='" + name + "']]");
         assertEquals(1, blocks.size(), "fixture: exactly one parameter block for " + name + ": "
@@ -251,12 +256,15 @@ final class TypedParameterFixtures {
         return controls.get(0);
     }
 
-    /** Fills in reason and approver and submits as a browser does; returns the answer (redirects followed). */
+    /**
+     * Fills in reason and approver and submits as a browser does; returns the answer (redirects
+     * followed) once its background JavaScript has settled ({@link PageScriptFixtures#settled}).
+     */
     static Page submit(JenkinsRule.WebClient wc, HtmlForm form, String reason, String approver) throws Exception {
         UsabilityFixtures.setField(form, "reason", reason);
         UsabilityFixtures.selectApprover(form, approver);
         Page answer = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         return answer;
     }
 
