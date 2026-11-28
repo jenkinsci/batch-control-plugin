@@ -116,7 +116,7 @@ public class ApproverIdStrategyTest {
         UsabilityFixtures.setField(form, "reason", "month-end batch through the Request Run form");
         UsabilityFixtures.tickApprovers(form, choice);
         Page answer = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "the Request Run submission designating " + choice
                 + " must be accepted, got HTTP " + answer.getWebResponse().getStatusCode()
                 + ApproverFormFixtures.alerts(answer.getWebResponse().getContentAsString()));

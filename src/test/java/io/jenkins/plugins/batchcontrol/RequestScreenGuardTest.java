@@ -182,7 +182,7 @@ public class RequestScreenGuardTest {
 
         Set<String> before = runRequestIds();
         Page refused = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertEquals(400, refused.getWebResponse().getStatusCode(), "a submission without a reason must be refused with"
                 + " HTTP 400: " + excerpt(refused.getWebResponse().getContentAsString()));
         assertEquals(before, runRequestIds(), "a refused submission stores no request");
@@ -194,7 +194,7 @@ public class RequestScreenGuardTest {
 
         UsabilityFixtures.setField(again, "reason", "month-end rerun after the fix");
         Page accepted = HtmlFormUtil.submit(again);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertTrue(accepted.getWebResponse().getStatusCode() < 400, "guard: the re-rendered form with a reason is accepted,"
                 + " got HTTP " + accepted.getWebResponse().getStatusCode() + ": " + excerpt(accepted.getWebResponse().getContentAsString()));
         Set<String> added = runRequestIds();

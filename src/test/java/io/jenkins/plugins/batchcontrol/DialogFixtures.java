@@ -72,7 +72,7 @@ final class DialogFixtures {
     static HtmlForm openDialog(JenkinsRule j, JenkinsRule.WebClient wc, Job<?, ?> job) throws Exception {
         WebResponse fragment = wc.loadWebResponse(new WebRequest(new URL(j.getURL(), fragmentPath(job))));
         assertEquals(200, fragment.getStatusCode(), "fixture: the dialog fragment of " + job.getFullName() + " must open");
-        Page jobPage = wc.getPage(new URL(j.getURL(), job.getUrl()));
+        Page jobPage = PageScriptFixtures.settled(wc.getPage(new URL(j.getURL(), job.getUrl())));
         assertEquals(200, jobPage.getWebResponse().getStatusCode(), "fixture: the job page of " + job.getFullName() + " must open");
         assertTrue(jobPage instanceof HtmlPage, "fixture: the job page must be HTML");
         HtmlPage page = (HtmlPage) jobPage;
@@ -90,7 +90,7 @@ final class DialogFixtures {
                 + " document.body.appendChild(host);"
                 + " evalInnerHtmlScripts(text, function () { Behaviour.applySubtree(host, true); });"
                 + "})();");
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         DomElement host = page.getElementById(HOST);
         assertNotNull(host, "fixture: the fragment must have been inserted into the job page");
         List<HtmlForm> forms = host.getByXPath(".//form");

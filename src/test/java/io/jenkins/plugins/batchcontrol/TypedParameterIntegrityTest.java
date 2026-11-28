@@ -715,7 +715,7 @@ public class TypedParameterIntegrityTest {
         assertEquals(400, response.getStatusCode(), what + " must be refused as a field error (HTTP 400): "
                 + UsabilityFixtures.excerpt(response.getContentAsString()));
         assertTrue(answer instanceof HtmlPage, what + ": the refusal must be an HTML page, got " + response.getContentType());
-        HtmlPage page = (HtmlPage) answer;
+        HtmlPage page = PageScriptFixtures.settled((HtmlPage) answer);
         UsabilityFixtures.assertNotBareErrorPage(what, page);
         String text = page.asNormalizedText();
         UsabilityFixtures.assertPlainRefusal(what, text, null);

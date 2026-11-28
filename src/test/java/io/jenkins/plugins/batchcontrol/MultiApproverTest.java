@@ -822,7 +822,7 @@ public class MultiApproverTest {
         UsabilityFixtures.setField(form, "reason", reason);
         UsabilityFixtures.tickApprovers(form, approvers);
         Page answer = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "fixture: the Request Run submission with "
                 + Arrays.toString(approvers) + " ticked must succeed, got HTTP " + answer.getWebResponse().getStatusCode()
                 + alerts(answer) + ": " + UsabilityFixtures.excerpt(answer.getWebResponse().getContentAsString()));

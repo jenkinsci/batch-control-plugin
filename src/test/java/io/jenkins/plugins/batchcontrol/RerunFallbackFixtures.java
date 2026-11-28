@@ -170,7 +170,7 @@ final class RerunFallbackFixtures {
 
     /** Opens {@code url} in {@code wc} (status 200, HTML) and returns the job's Request Run form on it. */
     static HtmlForm openForm(JenkinsRule.WebClient wc, Job<?, ?> job, URL url) throws Exception {
-        Page page = wc.getPage(url);
+        Page page = PageScriptFixtures.settled(wc.getPage(url));
         assertEquals(200, page.getWebResponse().getStatusCode(), "fixture: " + url + " must open");
         assertTrue(page instanceof HtmlPage, "fixture: the Request Run page must be HTML");
         List<HtmlForm> forms = UsabilityFixtures.formsEndingWith((HtmlPage) page, job.getUrl() + "batch-control/submit");
@@ -266,6 +266,7 @@ final class RerunFallbackFixtures {
 
     /** The elements of {@code page} marked {@code data-batch-control-notice="<kind>"}. */
     static List<DomElement> notices(HtmlPage page, String kind) {
+        PageScriptFixtures.settled(page);
         return page.getByXPath("//*[@data-batch-control-notice='" + kind + "']");
     }
 

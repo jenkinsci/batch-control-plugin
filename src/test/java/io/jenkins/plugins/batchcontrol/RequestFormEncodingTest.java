@@ -123,7 +123,7 @@ public class RequestFormEncodingTest {
         UsabilityFixtures.setField(form, "reason", REASON);
         UsabilityFixtures.tickApprovers(form);
         Page refused = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertRefusedNothingStored("the browser submission with no approver ticked", refused, before);
         assertEquals(REASON, keptReason(refused, "the re-rendered Request Run form"),
                 "a refused multipart Request Run submission must re-render the reason exactly as typed" + garbledHint());
@@ -272,7 +272,7 @@ public class RequestFormEncodingTest {
         }
         UsabilityFixtures.tickApprovers(form, approvers);
         Page answer = HtmlFormUtil.submit(form);
-        wc.waitForBackgroundJavaScript(5000);
+        PageScriptFixtures.settle(wc);
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "fixture: the Request Run submission with "
                 + Arrays.toString(approvers) + " must succeed, got HTTP " + answer.getWebResponse().getStatusCode()
                 + ApproverFormFixtures.alerts(answer.getWebResponse().getContentAsString()) + ": "
